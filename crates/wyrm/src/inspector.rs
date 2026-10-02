@@ -145,3 +145,62 @@ pub fn inspect_and_configure(
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn tmp_dir(prefix: &str) -> PathBuf {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("wyrm-{prefix}-{n}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn detect_pm_defaults_to_npm() {
+        let d = tmp_dir("pm");
+        assert_eq!(PackageManager::detect(&d), PackageManager::Npm);
+        std::fs::write(d.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(PackageManager::detect(&d), PackageManager::Pnpm);
+    }
+
+    #[test]
+    fn inspect_uses_start_script() {
+        let d = tmp_dir("start");
+        std::fs::write(
+            d.join("package.json"),
+            r#"{"name":"demo","scripts":{"start":"node index.js"}}"#,
+        )
+        .unwrap();
+        let cfg = inspect_and_configure(&d, None).unwrap();
+        assert_eq!(cfg.name, "demo");
+        assert_eq!(cfg.args, vec!["run".to_string(), "start".to_string()]);
+    }
+
+    #[test]
+    fn inspect_fails_without_package_json() {
+        let d = tmp_dir("missing");
+        assert!(inspect_and_configure(&d, None).is_err());
+    }
+
+    #[test]
+    fn inspect_detects_next_standalone() {
+        let d = tmp_dir("next");
+        std::fs::write(
+            d.join("package.json"),
+            r#"{"name":"web","scripts":{"start":"next start"}}"#,
+        )
+        .unwrap();
+        let standalone = d.join(".next").join("standalone");
+        std::fs::create_dir_all(&standalone).unwrap();
+        std::fs::write(standalone.join("server.js"), "").unwrap();
+        let cfg = inspect_and_configure(&d, None).unwrap();
+        assert_eq!(cfg.executable, "node.exe");
+        assert_eq!(cfg.args, vec!["server.js".to_string()]);
+    }
+}

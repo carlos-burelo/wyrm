@@ -166,3 +166,39 @@ impl Database {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inspector::AppConfig;
+    use std::collections::HashMap;
+
+    fn sample(name: &str) -> AppConfig {
+        AppConfig {
+            name: name.into(),
+            executable: "node.exe".into(),
+            args: vec!["server.js".into()],
+            cwd: PathBuf::from("C:\\tmp"),
+            env: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn crud_roundtrip() {
+        let db = Database::init_in_memory().unwrap();
+        db.save_app(&sample("a")).unwrap();
+        db.save_app(&sample("b")).unwrap();
+        let all = db.list_apps().unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].name, "a");
+
+        db.update_status("a", "RUNNING", true).unwrap();
+        let a = db.get_app("a").unwrap().unwrap();
+        assert_eq!(a.status, "RUNNING");
+        assert_eq!(a.restarts, 1);
+
+        assert!(db.delete_app("b").unwrap());
+        assert!(db.get_app("b").unwrap().is_none());
+        assert!(!db.delete_app("missing").unwrap());
+    }
+}

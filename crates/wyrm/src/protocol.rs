@@ -52,3 +52,23 @@ impl Response {
         self.status == "ok"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_request_response() {
+        let req = Request::new("LIST", serde_json::Value::Null);
+        let s = serde_json::to_string(&req).unwrap();
+        let back: Request = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.action, "LIST");
+
+        let ok = Response::ok("LIST", serde_json::json!([1, 2]));
+        assert!(ok.is_ok());
+        let err = Response::err("boom");
+        assert!(!err.is_ok());
+        // NDJSON: sin salto interno.
+        assert!(!serde_json::to_string(&ok).unwrap().contains('\n'));
+    }
+}
