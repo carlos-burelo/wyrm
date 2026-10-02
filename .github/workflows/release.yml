@@ -90,7 +90,12 @@ jobs:
           TAG_VERSION="${TAG#v}"
           echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
           cd npm
-          npm version "$TAG_VERSION" --no-git-tag-version
+          CURRENT="$(node -p "require('./package.json').version")"
+          if [ "$CURRENT" != "$TAG_VERSION" ]; then
+            npm version "$TAG_VERSION" --no-git-tag-version
+          else
+            echo "package.json ya en $TAG_VERSION, sin cambios."
+          fi
 
       - name: Stage vendor binary from build artifact
         uses: actions/download-artifact@v4
