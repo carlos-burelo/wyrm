@@ -2906,7 +2906,6 @@ dependencies = [
  "tracing-appender",
  "windows 0.58.0",
  "windows-service",
- "x509-parser",
 ]
 
 [[package]]
