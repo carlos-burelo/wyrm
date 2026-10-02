@@ -23,6 +23,13 @@ pub struct EcosystemApp {
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// Políticas de supervisión (todas opcionales, con defaults).
+    #[serde(default, skip_serializing_if = "is_default_policy")]
+    pub policy: crate::runtime::policy::Policy,
+}
+
+fn is_default_policy(p: &crate::runtime::policy::Policy) -> bool {
+    *p == Default::default()
 }
 
 fn default_cwd() -> PathBuf {
@@ -71,6 +78,7 @@ impl Ecosystem {
                 executable: None,
                 args: None,
                 env: cfg.env.clone(),
+                policy: Default::default(),
             }],
         };
         Ok((eco, cfg))
@@ -102,6 +110,8 @@ pub fn resolve(
     }
     // El env del ecosystem gana sobre el auto-detectado (.env).
     cfg.env.extend(app.env.clone());
+    // La policy del ecosystem sustituye a la default del inspector.
+    cfg.policy = app.policy.clone();
     Ok(cfg)
 }
 
@@ -118,6 +128,7 @@ mod tests {
                 executable: None,
                 args: None,
                 env: HashMap::from([("PORT".to_string(), "3000".to_string())]),
+                policy: Default::default(),
             }],
         };
         let s = serde_json::to_string(&eco).unwrap();

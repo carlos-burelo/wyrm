@@ -39,6 +39,7 @@ impl AppRecord {
             args: self.args.clone(),
             cwd: PathBuf::from(&self.cwd),
             env: self.env.clone(),
+            policy: Default::default(),
         }
     }
 }
@@ -158,13 +159,13 @@ mod tests {
     use std::collections::HashMap;
 
     fn sample(name: &str) -> AppConfig {
-        AppConfig {
-            name: name.into(),
-            executable: "node.exe".into(),
-            args: vec!["server.js".into()],
-            cwd: PathBuf::from("C:\\tmp"),
-            env: HashMap::new(),
-        }
+        AppConfig::new(
+            name.into(),
+            "node.exe".into(),
+            vec!["server.js".into()],
+            PathBuf::from("C:\\tmp"),
+            HashMap::new(),
+        )
     }
 
     #[test]

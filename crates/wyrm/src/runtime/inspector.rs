@@ -49,6 +49,27 @@ pub struct AppConfig {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub policy: super::policy::Policy,
+}
+
+impl AppConfig {
+    pub fn new(
+        name: String,
+        executable: String,
+        args: Vec<String>,
+        cwd: PathBuf,
+        env: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            name,
+            executable,
+            args,
+            cwd,
+            env,
+            policy: Default::default(),
+        }
+    }
 }
 
 pub fn inspect_and_configure(
@@ -101,43 +122,43 @@ pub fn inspect_and_configure(
         .join("standalone")
         .join("server.js");
     if next_standalone.exists() {
-        return Ok(AppConfig {
-            name: app_name,
-            executable: "node.exe".to_string(),
-            args: vec!["server.js".to_string()],
-            cwd: project_dir.join(".next").join("standalone"),
-            env: env_vars,
-        });
+        return Ok(AppConfig::new(
+            app_name,
+            "node.exe".to_string(),
+            vec!["server.js".to_string()],
+            project_dir.join(".next").join("standalone"),
+            env_vars,
+        ));
     }
 
     let astro_entry = project_dir.join("dist").join("server").join("entry.mjs");
     if (deps.contains_key("astro") || dev_deps.contains_key("astro")) && astro_entry.exists() {
-        return Ok(AppConfig {
-            name: app_name,
-            executable: "node.exe".to_string(),
-            args: vec!["dist/server/entry.mjs".to_string()],
-            cwd: project_dir.to_path_buf(),
-            env: env_vars,
-        });
+        return Ok(AppConfig::new(
+            app_name,
+            "node.exe".to_string(),
+            vec!["dist/server/entry.mjs".to_string()],
+            project_dir.to_path_buf(),
+            env_vars,
+        ));
     }
 
     let scripts = pkg.scripts.unwrap_or_default();
     if scripts.contains_key("start") {
-        Ok(AppConfig {
-            name: app_name,
-            executable: pm.get_cmd().to_string(),
-            args: vec!["run".to_string(), "start".to_string()],
-            cwd: project_dir.to_path_buf(),
-            env: env_vars,
-        })
+        Ok(AppConfig::new(
+            app_name,
+            pm.get_cmd().to_string(),
+            vec!["run".to_string(), "start".to_string()],
+            project_dir.to_path_buf(),
+            env_vars,
+        ))
     } else if project_dir.join("dist").join("main.js").exists() {
-        Ok(AppConfig {
-            name: app_name,
-            executable: "node.exe".to_string(),
-            args: vec!["dist/main.js".to_string()],
-            cwd: project_dir.to_path_buf(),
-            env: env_vars,
-        })
+        Ok(AppConfig::new(
+            app_name,
+            "node.exe".to_string(),
+            vec!["dist/main.js".to_string()],
+            project_dir.to_path_buf(),
+            env_vars,
+        ))
     } else {
         Err(
             "No se pudo detectar el comando de inicio. Define un script 'start' en package.json."
