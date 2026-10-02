@@ -55,6 +55,8 @@ pub fn spawn_managed(
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
+    // El log nunca crece sin cota: rota antes de abrir en append.
+    crate::logs::rotate_if_needed(&config.name);
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
