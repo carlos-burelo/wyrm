@@ -65,14 +65,7 @@ pub(crate) async fn refresh_apps(st: &mut TuiState) {
     }
     // Preview del seleccionado para el panel derecho.
     if let Some(app) = st.selected_app() {
-        let path = crate::store::db::Database::log_path_for(&app.name);
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            let n = lines.len().saturating_sub(12);
-            st.preview_lines = lines[n..].to_vec();
-        } else {
-            st.preview_lines = vec!["(sin logs todavía)".into()];
-        }
+        st.preview_lines = crate::logs::tail_lines(&app.name, 12);
     } else {
         st.preview_lines.clear();
     }
@@ -96,20 +89,14 @@ pub(crate) fn app_live_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (f32,
 }
 
 pub(crate) fn load_logs(st: &mut TuiState) {
-    let path = crate::store::db::Database::log_path_for(&st.log_name);
-    st.log_lines = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| "(sin logs todavía)".into())
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
+    st.log_lines = crate::logs::read_lines(&st.log_name);
     if st.log_follow {
         st.log_scroll = 0;
     }
 }
 
 pub(crate) fn flush_logs(st: &mut TuiState) {
-    let path = crate::store::db::Database::log_path_for(&st.log_name);
-    let _ = std::fs::write(&path, "");
+    let _ = crate::logs::flush(&st.log_name);
     st.log_lines.clear();
     st.log_scroll = 0;
     st.error = Some(format!("Logs de {} vaciados", st.log_name));
@@ -127,14 +114,7 @@ pub(crate) fn open_logs_for_selected(st: &mut TuiState) {
 
 pub(crate) fn refresh_preview(st: &mut TuiState) {
     if let Some(app) = st.selected_app() {
-        let path = crate::store::db::Database::log_path_for(&app.name);
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            let n = lines.len().saturating_sub(12);
-            st.preview_lines = lines[n..].to_vec();
-        } else {
-            st.preview_lines = vec!["(sin logs todavía)".into()];
-        }
+        st.preview_lines = crate::logs::tail_lines(&app.name, 12);
     }
 }
 

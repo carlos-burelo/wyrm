@@ -31,10 +31,7 @@ pub async fn cmd_logs(
             }
         }
     } else {
-        let content = std::fs::read_to_string(&path)?;
-        let all: Vec<&str> = content.lines().collect();
-        let start = all.len().saturating_sub(lines);
-        for l in &all[start..] {
+        for l in crate::logs::tail_lines(name, lines) {
             println!("{l}");
         }
     }

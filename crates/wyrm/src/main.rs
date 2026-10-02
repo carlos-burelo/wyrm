@@ -1,6 +1,7 @@
 mod cli;
 mod daemon;
 mod ipc;
+mod logs;
 mod runtime;
 mod store;
 mod tui;
