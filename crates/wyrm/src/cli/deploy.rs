@@ -87,3 +87,54 @@ pub async fn cmd_deploy(
     println!("Deploy ok: {before} → {after}");
     Ok(())
 }
+
+pub async fn cmd_releases(name: &str, limit: i64) -> Result<(), Box<dyn std::error::Error>> {
+    let db = crate::store::db::Database::init()?;
+    let rows = db.list_deploys(name, limit.max(1).min(50))?;
+    if rows.is_empty() {
+        println!("Sin deploys para {name} (usa `wyrm deploy {name}`).");
+        return Ok(());
+    }
+    println!("{:<19} {:<12} {:.7} → {:.7}", "FECHA", "ESTADO", "DE", "A");
+    for r in rows {
+        let short = |s: &str| {
+            if s.len() > 7 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+                s[..7].to_string()
+            } else {
+                s.to_string()
+            }
+        };
+        println!(
+            "{:<19} {:<12} {} → {}",
+            r.created_at,
+            r.status,
+            short(&r.sha_before),
+            short(&r.sha_after)
+        );
+    }
+    Ok(())
+}
+
+pub async fn cmd_rollback(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let db = crate::store::db::Database::init()?;
+    let cwd = app_cwd(name)?;
+    let target = db
+        .list_deploys(name, 10)?
+        .into_iter()
+        .find(|r| r.status == "ok")
+        .map(|r| r.sha_after)
+        .ok_or(format!("Sin deploys ok para {name}; nada a lo que volver."))?;
+    if target == "(no-git)" {
+        return Err("El último deploy no fue git; rollback manual requerido.".into());
+    }
+    println!("Rollback {name} → {target}");
+    let now = crate::deploy::git_reset(&cwd, &target)?;
+    match crate::ipc::send_request("RESTART", serde_json::json!({ "name": name })).await {
+        Ok(res) if res.is_ok() => println!("restart OK"),
+        Ok(res) => eprintln!("Aviso restart: {}", res.message),
+        Err(e) => eprintln!("Aviso: demonio no disponible ({e})."),
+    }
+    let _ = db.record_deploy(name, &target, &now, "rollback");
+    println!("Rollback ok en {now}");
+    Ok(())
+}
