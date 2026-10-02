@@ -46,6 +46,15 @@ fn default_cwd() -> PathBuf {
 pub struct Ecosystem {
     #[serde(default)]
     pub apps: Vec<EcosystemApp>,
+    /// Rutas del edge que se aplican con `wyrm start --all`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<EcosystemRoute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcosystemRoute {
+    pub host: String,
+    pub target: String,
 }
 
 impl Ecosystem {
@@ -88,6 +97,7 @@ impl Ecosystem {
                 pre_deploy: None,
                 post_deploy: None,
             }],
+            routes: vec![],
         };
         Ok((eco, cfg))
     }
@@ -140,6 +150,7 @@ mod tests {
                 pre_deploy: None,
                 post_deploy: None,
             }],
+            routes: vec![],
         };
         let s = serde_json::to_string(&eco).unwrap();
         let back: Ecosystem = serde_json::from_str(&s).unwrap();

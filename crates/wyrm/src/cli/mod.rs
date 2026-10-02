@@ -8,6 +8,7 @@ pub mod init;
 pub mod list;
 pub mod logs;
 pub mod manage;
+pub mod route;
 pub mod start;
 pub mod status;
 pub mod token;
@@ -99,6 +100,14 @@ pub enum Commands {
         #[arg(long, default_value_t = false)]
         rotate: bool,
     },
+    /// Rutas del edge: route <add|list|rm> [host] [target]
+    Route {
+        action: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
+    },
+    /// Proxy edge en foreground (WYRM_EDGE_PORT, default 80)
+    Edge,
     /// Diagnóstico del entorno (node, demonio, servicio, disco, logs)
     Doctor,
     /// TUI interactiva de primer nivel
@@ -137,6 +146,8 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Releases { name, limit }) => deploy::cmd_releases(&name, limit).await?,
         Some(Commands::Rollback { name }) => deploy::cmd_rollback(&name).await?,
         Some(Commands::Token { rotate }) => token::cmd_token(rotate).await?,
+        Some(Commands::Route { action, rest }) => route::cmd_route(&action, &rest).await?,
+        Some(Commands::Edge) => route::cmd_edge().await?,
         Some(Commands::Doctor) => doctor::cmd_doctor().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {

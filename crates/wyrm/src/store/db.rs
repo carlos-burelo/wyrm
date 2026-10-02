@@ -201,6 +201,67 @@ pub struct DeployRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct RouteRecord {
+    pub host: String,
+    pub target: String,
+}
+
+impl Database {
+    fn ensure_routes(&self) -> Result<()> {
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS routes (
+                host TEXT PRIMARY KEY,
+                target TEXT NOT NULL
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert_route(&self, host: &str, target: &str) -> Result<()> {
+        self.ensure_routes()?;
+        self.conn.execute(
+            "INSERT INTO routes (host, target) VALUES (?1, ?2)
+             ON CONFLICT(host) DO UPDATE SET target = excluded.target",
+            params![host.to_lowercase(), target],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_route(&self, host: &str) -> Result<bool> {
+        self.ensure_routes()?;
+        let n = self.conn.execute(
+            "DELETE FROM routes WHERE host = ?1",
+            params![host.to_lowercase()],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn list_routes(&self) -> Result<Vec<RouteRecord>> {
+        self.ensure_routes()?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT host, target FROM routes ORDER BY host")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(RouteRecord {
+                host: row.get(0)?,
+                target: row.get(1)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_route(&self, host: &str) -> Result<Option<String>> {
+        self.ensure_routes()?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT target FROM routes WHERE host = ?1")?;
+        let mut rows = stmt.query_map(params![host.to_lowercase()], |row| row.get(0))?;
+        Ok(rows.next().transpose()?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +295,21 @@ mod tests {
         assert!(db.delete_app("b").unwrap());
         assert!(db.get_app("b").unwrap().is_none());
         assert!(!db.delete_app("missing").unwrap());
+    }
+
+    #[test]
+    fn routes_crud_case_insensitive() {
+        let db = Database::init_in_memory().unwrap();
+        db.upsert_route("App.Example.com", "http://127.0.0.1:3000")
+            .unwrap();
+        assert_eq!(
+            db.get_route("app.example.com").unwrap().as_deref(),
+            Some("http://127.0.0.1:3000")
+        );
+        db.upsert_route("app.example.com", "http://127.0.0.1:3001")
+            .unwrap();
+        assert_eq!(db.list_routes().unwrap().len(), 1);
+        assert!(db.delete_route("APP.EXAMPLE.COM").unwrap());
+        assert!(db.get_route("app.example.com").unwrap().is_none());
     }
 }

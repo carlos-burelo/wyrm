@@ -3,6 +3,7 @@ mod cli;
 mod daemon;
 mod deploy;
 mod ecosystem;
+mod edge;
 mod ipc;
 mod logs;
 mod runtime;

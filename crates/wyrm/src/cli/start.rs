@@ -44,6 +44,19 @@ pub async fn cmd_start_all(file: Option<PathBuf>) -> Result<(), Box<dyn std::err
     let eco = crate::ecosystem::Ecosystem::load(&path)?;
     println!("Ecosystem {}: {} app(s)", path.display(), eco.apps.len());
 
+    if !eco.routes.is_empty() {
+        if let Ok(db) = crate::store::db::Database::init() {
+            for r in &eco.routes {
+                if r.target.starts_with("http://") || r.target.starts_with("https://") {
+                    let _ = db.upsert_route(&r.host, &r.target);
+                    println!("Ruta {} → {}", r.host, r.target);
+                } else {
+                    eprintln!("Ruta {} ignorada: target debe ser http(s)", r.host);
+                }
+            }
+        }
+    }
+
     let mut ok = 0;
     for app in &eco.apps {
         match crate::ecosystem::resolve(&base, app) {
