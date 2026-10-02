@@ -67,6 +67,35 @@ wyrm start --all --file ./prod.json
 `executable`/`args` opcionales: si faltan se auto-detectan. `cwd` relativo
 al archivo. El `env` del archivo gana sobre `.env`.
 
+Políticas por app (`policy: {...}` en `wyrm.json` o payload `START`):
+
+```json
+{
+  "policy": {
+    "max_restarts": 10,
+    "min_uptime_secs": 5,
+    "stop_timeout_secs": 5,
+    "max_memory_mb": 512,
+    "healthcheck_url": "http://127.0.0.1:3000/health",
+    "healthcheck_secs": 30
+  }
+}
+```
+
+- Salir antes de `min_uptime_secs` suma crash-loop; al llegar a
+  `max_restarts` la app queda `ERRORED` (requiere `wyrm restart` manual).
+- `max_memory_mb` reinicia al superar la RSS; `healthcheck_url` con 3 fallos
+  seguidos mata el proceso para que el supervisor lo reinicie.
+- Logs rotan a 10 MiB conservando 5 históricos (`app.log.1…5`).
+- No se persisten en SQLite (solo vive en ecosystem/`START`; el restore usa
+  defaults). En Windows el stop es terminate (CTRL+BREAK elegante: futuro).
+
+Diagnóstico:
+
+```powershell
+wyrm doctor   # node, demonio, servicio, DB, disco, logs + hints
+```
+
 Servicio Windows (producción):
 
 ```powershell
