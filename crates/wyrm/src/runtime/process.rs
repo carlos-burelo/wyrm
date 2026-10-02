@@ -49,7 +49,7 @@ pub(crate) fn create_job() -> Result<JobHandle, Box<dyn std::error::Error + Send
 }
 
 pub fn spawn_managed(
-    config: &crate::inspector::AppConfig,
+    config: &crate::runtime::inspector::AppConfig,
     log_path: &Path,
 ) -> Result<ManagedChild, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(parent) = log_path.parent() {

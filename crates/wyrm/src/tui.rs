@@ -219,8 +219,8 @@ async fn refresh_apps(st: &mut TuiState) {
         }
         Err(_) => {
             st.daemon_on = false;
-            let db_rows: Vec<crate::db::AppRecord> = tokio::task::spawn_blocking(|| {
-                crate::db::Database::init()
+            let db_rows: Vec<crate::store::db::AppRecord> = tokio::task::spawn_blocking(|| {
+                crate::store::db::Database::init()
                     .and_then(|db| db.list_apps())
                     .unwrap_or_default()
             })
@@ -262,7 +262,7 @@ async fn refresh_apps(st: &mut TuiState) {
     }
     // Preview del seleccionado para el panel derecho.
     if let Some(app) = st.selected_app() {
-        let path = crate::db::Database::log_path_for(&app.name);
+        let path = crate::store::db::Database::log_path_for(&app.name);
         if let Ok(content) = std::fs::read_to_string(&path) {
             let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             let n = lines.len().saturating_sub(12);
@@ -293,7 +293,7 @@ fn app_live_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (f32, f64) {
 }
 
 fn load_logs(st: &mut TuiState) {
-    let path = crate::db::Database::log_path_for(&st.log_name);
+    let path = crate::store::db::Database::log_path_for(&st.log_name);
     st.log_lines = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| "(sin logs todavía)".into())
         .lines()
@@ -305,7 +305,7 @@ fn load_logs(st: &mut TuiState) {
 }
 
 fn flush_logs(st: &mut TuiState) {
-    let path = crate::db::Database::log_path_for(&st.log_name);
+    let path = crate::store::db::Database::log_path_for(&st.log_name);
     let _ = std::fs::write(&path, "");
     st.log_lines.clear();
     st.log_scroll = 0;
@@ -531,7 +531,7 @@ async fn event_loop(
 
 fn refresh_preview(st: &mut TuiState) {
     if let Some(app) = st.selected_app() {
-        let path = crate::db::Database::log_path_for(&app.name);
+        let path = crate::store::db::Database::log_path_for(&app.name);
         if let Ok(content) = std::fs::read_to_string(&path) {
             let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             let n = lines.len().saturating_sub(12);
@@ -551,7 +551,7 @@ async fn do_start(name: &str) {
     // Ventaja sobre pm2: no necesitas cwd ni ecosystem a mano.
     let owned = name.to_string();
     let cfg = tokio::task::spawn_blocking(move || {
-        crate::db::Database::init()
+        crate::store::db::Database::init()
             .and_then(|db| db.get_app(&owned))
             .unwrap_or(None)
             .map(|r| r.to_app_config())
@@ -781,7 +781,7 @@ fn draw_detail(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         return;
     };
     let (cpu, mem) = proc_metrics(&st.sys, app.pid);
-    let log_path = crate::db::Database::log_path_for(&app.name);
+    let log_path = crate::store::db::Database::log_path_for(&app.name);
     let mem_pct = if st.mem_total_gb > 0.0 {
         (st.mem_used_gb / st.mem_total_gb * 100.0).clamp(0.0, 100.0)
     } else {

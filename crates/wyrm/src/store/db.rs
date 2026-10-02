@@ -32,8 +32,8 @@ impl AppRecord {
         })
     }
 
-    pub fn to_app_config(&self) -> crate::inspector::AppConfig {
-        crate::inspector::AppConfig {
+    pub fn to_app_config(&self) -> crate::runtime::inspector::AppConfig {
+        crate::runtime::inspector::AppConfig {
             name: self.name.clone(),
             executable: self.executable.clone(),
             args: self.args.clone(),
@@ -94,7 +94,7 @@ impl Database {
         Ok(Self { conn })
     }
 
-    pub fn save_app(&self, app: &crate::inspector::AppConfig) -> Result<()> {
+    pub fn save_app(&self, app: &crate::runtime::inspector::AppConfig) -> Result<()> {
         let args_json = serde_json::to_string(&app.args).unwrap_or_else(|_| "[]".into());
         let env_json = serde_json::to_string(&app.env).unwrap_or_else(|_| "{}".into());
         let cwd = app.cwd.to_string_lossy().to_string();
@@ -154,7 +154,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inspector::AppConfig;
+    use crate::runtime::inspector::AppConfig;
     use std::collections::HashMap;
 
     fn sample(name: &str) -> AppConfig {

@@ -1,6 +1,6 @@
-use crate::inspector::AppConfig;
-use crate::process::{spawn_managed, ManagedChild};
-use crate::protocol::{Request, Response};
+use crate::ipc::protocol::{Request, Response};
+use crate::runtime::inspector::AppConfig;
+use crate::runtime::process::{spawn_managed, ManagedChild};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,7 +72,7 @@ impl Daemon {
 
     pub async fn restore_from_db(self: &Arc<Self>) {
         let apps = tokio::task::spawn_blocking(|| {
-            crate::db::Database::init()
+            crate::store::db::Database::init()
                 .and_then(|db| db.list_apps())
                 .unwrap_or_default()
         })
@@ -85,7 +85,7 @@ impl Daemon {
             if rec.status == "RUNNING" {
                 let cfg = rec.to_app_config();
                 let mut app = ManagedApp::new(cfg.clone());
-                match spawn_managed(&cfg, &crate::db::Database::log_path_for(&cfg.name)) {
+                match spawn_managed(&cfg, &crate::store::db::Database::log_path_for(&cfg.name)) {
                     Ok(child) => {
                         app.child = Some(child);
                         app.status = "RUNNING".to_string();
@@ -160,7 +160,7 @@ impl Daemon {
             guard.insert(cfg.name.clone(), ManagedApp::new(cfg.clone()));
         }
         let name = cfg.name.clone();
-        let log_path = crate::db::Database::log_path_for(&name);
+        let log_path = crate::store::db::Database::log_path_for(&name);
         match spawn_managed(&cfg, &log_path) {
             Ok(child) => {
                 let app = guard.get_mut(&name).unwrap();
@@ -221,7 +221,7 @@ impl Daemon {
         // Pequeña espera para liberar puerto.
         tokio::time::sleep(Duration::from_millis(400)).await;
         let mut guard = self.apps.lock().await;
-        let log_path = crate::db::Database::log_path_for(&name);
+        let log_path = crate::store::db::Database::log_path_for(&name);
         match spawn_managed(&cfg, &log_path) {
             Ok(child) => {
                 let app = guard.get_mut(name).unwrap();
@@ -253,7 +253,7 @@ impl Daemon {
         }
         let name2 = owned.clone();
         let ok = tokio::task::spawn_blocking(move || {
-            crate::db::Database::init()
+            crate::store::db::Database::init()
                 .and_then(|db| db.delete_app(&name2))
                 .unwrap_or(false)
         })
@@ -270,7 +270,7 @@ impl Daemon {
     async fn list(&self) -> Response {
         // Base: DB para incluir apps STOPPED no cargadas en memoria.
         let db_apps = tokio::task::spawn_blocking(|| {
-            crate::db::Database::init()
+            crate::store::db::Database::init()
                 .and_then(|db| db.list_apps())
                 .unwrap_or_default()
         })
@@ -319,7 +319,7 @@ impl Daemon {
         // Fallback DB.
         let name_owned = name.to_string();
         let rec = tokio::task::spawn_blocking(move || {
-            crate::db::Database::init()
+            crate::store::db::Database::init()
                 .and_then(|db| db.get_app(&name_owned))
                 .unwrap_or(None)
         })
@@ -383,7 +383,7 @@ impl Daemon {
             }
             for cfg in to_restart {
                 let name = cfg.name.clone();
-                let log_path = crate::db::Database::log_path_for(&name);
+                let log_path = crate::store::db::Database::log_path_for(&name);
                 match spawn_managed(&cfg, &log_path) {
                     Ok(child) => {
                         let mut guard = self.apps.lock().await;
@@ -415,7 +415,7 @@ fn persist_status(name: &str, status: &str, inc: bool) {
     let name = name.to_string();
     let status = status.to_string();
     std::thread::spawn(move || {
-        if let Ok(db) = crate::db::Database::init() {
+        if let Ok(db) = crate::store::db::Database::init() {
             let _ = db.update_status(&name, &status, inc);
         }
     });

@@ -4,13 +4,6 @@ mod runtime;
 mod store;
 mod tui;
 
-// Shims temporales durante la migración a full layout (se eliminan al final).
-pub(crate) use ipc::protocol;
-pub(crate) use runtime::inspector;
-pub(crate) use runtime::process;
-pub(crate) use runtime::service;
-pub(crate) use store::db;
-
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -73,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     if cli.daemon {
-        return crate::service::start_service_dispatcher().map_err(|e| e.into());
+        return crate::runtime::service::start_service_dispatcher().map_err(|e| e.into());
     }
 
     match cli.command {
@@ -91,8 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Daemon) => crate::daemon::run_foreground().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {
-            "install" => crate::service::install_service()?,
-            "uninstall" => crate::service::uninstall_service()?,
+            "install" => crate::runtime::service::install_service()?,
+            "uninstall" => crate::runtime::service::uninstall_service()?,
             _ => println!("Uso: wyrm service <install|uninstall>"),
         },
         None => {
@@ -131,10 +124,10 @@ async fn cmd_start(
     let target_dir = cwd
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let app_config = crate::inspector::inspect_and_configure(&target_dir, name)?;
+    let app_config = crate::runtime::inspector::inspect_and_configure(&target_dir, name)?;
 
     {
-        let db = crate::db::Database::init()?;
+        let db = crate::store::db::Database::init()?;
         db.save_app(&app_config)?;
     }
 
@@ -162,7 +155,7 @@ async fn cmd_simple(action: &str, name: &str) -> Result<(), Box<dyn std::error::
         Err(e) => {
             // Fallback DB para STOP: marca STOPPED aunque el daemon esté caído.
             if action == "STOP" {
-                if let Ok(db) = crate::db::Database::init() {
+                if let Ok(db) = crate::store::db::Database::init() {
                     let _ = db.update_status(name, "STOPPED", false);
                 }
             }
@@ -181,7 +174,7 @@ async fn cmd_delete(name: &str, yes: bool) -> Result<(), Box<dyn std::error::Err
         Ok(res) => println!("{}", res.message),
         Err(e) => {
             // Fallback: borra de DB.
-            match crate::db::Database::init()?.delete_app(name) {
+            match crate::store::db::Database::init()?.delete_app(name) {
                 Ok(true) => println!("{name} eliminada de DB (daemon no disponible)."),
                 _ => eprintln!("No se pudo eliminar: {e}"),
             }
@@ -199,7 +192,7 @@ async fn cmd_list(json: bool) -> Result<(), Box<dyn std::error::Error>> {
             _ => {
                 // Fallback DB.
                 let db_rows = tokio::task::spawn_blocking(|| {
-                    crate::db::Database::init()
+                    crate::store::db::Database::init()
                         .and_then(|db| db.list_apps())
                         .unwrap_or_default()
                 })
@@ -289,7 +282,7 @@ async fn cmd_logs(
     lines: usize,
     follow: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let path = crate::db::Database::log_path_for(name);
+    let path = crate::store::db::Database::log_path_for(name);
     if !path.exists() {
         eprintln!("Sin logs en {} (¿la app existe?)", path.display());
         return Ok(());
