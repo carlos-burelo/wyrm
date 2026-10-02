@@ -1,7 +1,9 @@
+mod daemon;
 mod db;
 mod inspector;
 mod ipc;
 mod process;
+mod protocol;
 mod service;
 
 use clap::{Parser, Subcommand};
