@@ -25,6 +25,36 @@ enum Tab {
     Help,
 }
 
+#[derive(PartialEq, Clone, Copy)]
+enum SortMode {
+    Name,
+    Cpu,
+    Mem,
+    Uptime,
+    Restarts,
+}
+
+impl SortMode {
+    fn next(self) -> SortMode {
+        match self {
+            SortMode::Name => SortMode::Cpu,
+            SortMode::Cpu => SortMode::Mem,
+            SortMode::Mem => SortMode::Uptime,
+            SortMode::Uptime => SortMode::Restarts,
+            SortMode::Restarts => SortMode::Name,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            SortMode::Name => "nombre",
+            SortMode::Cpu => "cpu",
+            SortMode::Mem => "mem",
+            SortMode::Uptime => "uptime",
+            SortMode::Restarts => "restarts",
+        }
+    }
+}
+
 impl Tab {
     fn all() -> &'static [Tab] {
         &[Tab::Dashboard, Tab::Logs, Tab::Help]
@@ -49,6 +79,7 @@ struct TuiState {
     apps: Vec<AppStatus>,
     selected: usize,
     tab: Tab,
+    sort: SortMode,
     log_name: String,
     log_lines: Vec<String>,
     log_scroll: usize,
@@ -81,6 +112,7 @@ impl TuiState {
             apps: vec![],
             selected: 0,
             tab: Tab::Dashboard,
+            sort: SortMode::Name,
             log_name: String::new(),
             log_lines: vec![],
             log_scroll: 0,
@@ -108,11 +140,29 @@ impl TuiState {
 
     fn filtered(&self) -> Vec<(usize, &AppStatus)> {
         let f = self.filter.to_lowercase();
-        self.apps
+        let mut v: Vec<(usize, &AppStatus)> = self
+            .apps
             .iter()
             .enumerate()
             .filter(|(_, a)| f.is_empty() || a.name.to_lowercase().contains(&f))
-            .collect()
+            .collect();
+        // Orden superior a pm2 list: cuello ordenable en vivo.
+        match self.sort {
+            SortMode::Name => v.sort_by(|a, b| a.1.name.cmp(&b.1.name)),
+            SortMode::Cpu => v.sort_by(|a, b| {
+                proc_cpu(&self.sys, b.1.pid)
+                    .partial_cmp(&proc_cpu(&self.sys, a.1.pid))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
+            SortMode::Mem => v.sort_by(|a, b| {
+                proc_mem_mb(&self.sys, b.1.pid)
+                    .partial_cmp(&proc_mem_mb(&self.sys, a.1.pid))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
+            SortMode::Uptime => v.sort_by(|a, b| b.1.uptime_secs.cmp(&a.1.uptime_secs)),
+            SortMode::Restarts => v.sort_by(|a, b| b.1.restarts.cmp(&a.1.restarts)),
+        }
+        v
     }
 
     fn selected_app(&self) -> Option<AppStatus> {
@@ -392,6 +442,18 @@ async fn event_loop(
                                 refresh_apps(st).await;
                             }
                         }
+                        KeyCode::Char('S') => {
+                            if let Some(app) = st.selected_app() {
+                                st.error = Some(format!("Arrancando {}…", app.name));
+                                do_start(&app.name).await;
+                                refresh_apps(st).await;
+                                st.error = None;
+                            }
+                        }
+                        KeyCode::Char('o') => {
+                            st.sort = st.sort.next();
+                            st.selected = 0;
+                        }
                         KeyCode::Char('d') => {
                             if st.selected_app().is_some() {
                                 st.confirm_delete = true;
@@ -482,6 +544,25 @@ fn refresh_preview(st: &mut TuiState) {
 
 async fn do_action(action: &str, name: &str) {
     let _ = crate::ipc::send_request(action, serde_json::json!({ "name": name })).await;
+}
+
+async fn do_start(name: &str) {
+    // Revive STOPPED desde DB: carga AppConfig y envía START al demonio.
+    // Ventaja sobre pm2: no necesitas cwd ni ecosystem a mano.
+    let owned = name.to_string();
+    let cfg = tokio::task::spawn_blocking(move || {
+        crate::db::Database::init()
+            .and_then(|db| db.get_app(&owned))
+            .unwrap_or(None)
+            .map(|r| r.to_app_config())
+    })
+    .await
+    .unwrap_or(None);
+    if let Some(cfg) = cfg {
+        if let Ok(payload) = serde_json::to_value(&cfg) {
+            let _ = crate::ipc::send_request("START", payload).await;
+        }
+    }
 }
 
 async fn do_delete(name: &str) {
@@ -671,7 +752,11 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         .header(header)
         .block(
             Block::default()
-                .title(format!(" aplicaciones ({}) ", rows_data.len()))
+                .title(format!(
+                    " aplicaciones ({}) [o:ord:{}] ",
+                    rows_data.len(),
+                    st.sort.label()
+                ))
                 .borders(Borders::ALL),
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
@@ -862,17 +947,23 @@ fn log_line_styled_query(line: &str, query: &str) -> Line<'static> {
 }
 
 fn proc_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (String, String) {
-    let Some(pid) = pid else {
+    let (cpu, mem) = app_live_metrics(sys, pid);
+    if pid.is_none() {
         return ("-".into(), "-".into());
-    };
-    let id = sysinfo::Pid::from_u32(pid);
-    match sys.process(id) {
-        Some(p) => (
-            format!("{:.1}", p.cpu_usage()),
-            format!("{:.0}M", p.memory() as f64 / 1_048_576.0),
-        ),
-        None => ("-".into(), "-".into()),
     }
+    let id = sysinfo::Pid::from_u32(pid.unwrap_or(0));
+    if sys.process(id).is_none() {
+        return ("-".into(), "-".into());
+    }
+    (format!("{cpu:.1}"), format!("{mem:.0}M"))
+}
+
+fn proc_cpu(sys: &sysinfo::System, pid: Option<u32>) -> f32 {
+    app_live_metrics(sys, pid).0
+}
+
+fn proc_mem_mb(sys: &sysinfo::System, pid: Option<u32>) -> f64 {
+    app_live_metrics(sys, pid).1
 }
 
 fn fmt_uptime(secs: u64) -> String {
