@@ -48,27 +48,15 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn data_dir() -> PathBuf {
-        let mut path = PathBuf::from(
-            std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string()),
-        );
-        path.push("wyrm");
-        path
-    }
-
-    pub fn db_path() -> PathBuf {
-        Self::data_dir().join("wyrm.db")
-    }
-
-    pub fn logs_dir() -> PathBuf {
-        Self::data_dir().join("logs")
+    pub fn log_path_for(name: &str) -> PathBuf {
+        super::paths::log_path_for(name)
     }
 
     pub fn init() -> Result<Self> {
-        let dir = Self::data_dir();
+        let dir = super::paths::data_dir();
         fs::create_dir_all(&dir).ok();
-        fs::create_dir_all(Self::logs_dir()).ok();
-        let conn = Connection::open(Self::db_path())?;
+        fs::create_dir_all(super::paths::logs_dir()).ok();
+        let conn = Connection::open(super::paths::db_path())?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS apps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,10 +133,6 @@ impl Database {
             .conn
             .execute("DELETE FROM apps WHERE name = ?1", params![name])?;
         Ok(n > 0)
-    }
-
-    pub fn log_path_for(name: &str) -> PathBuf {
-        Self::logs_dir().join(format!("{name}.log"))
     }
 
     pub fn update_status(&self, name: &str, status: &str, increment_restarts: bool) -> Result<()> {

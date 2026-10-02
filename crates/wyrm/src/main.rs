@@ -1,11 +1,14 @@
 mod daemon;
-mod db;
 mod inspector;
 mod ipc;
 mod process;
 mod protocol;
 mod service;
+mod store;
 mod tui;
+
+// Shims temporales durante la migración a full layout (se eliminan al final).
+pub(crate) use store::db;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
