@@ -1,0 +1,10 @@
+{
+  "name": "wyrm-root",
+  "private": true,
+  "scripts": {
+    "build:rust": "cargo build --release",
+    "copy:bin": "node -e \"const fs = require('fs'); if (!fs.existsSync('npm/vendor')) fs.mkdirSync('npm/vendor', { recursive: true }); fs.copyFileSync('target/release/wyrm.exe', 'npm/vendor/wyrm.exe');\"",
+    "build": "npm run build:rust && npm run copy:bin",
+    "test:cli": "node npm/bin/cli.js"
+  }
+}

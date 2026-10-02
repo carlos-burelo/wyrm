@@ -1,0 +1,6 @@
+/target
+/npm/vendor
+node_modules/
+*.db
+*.log
+.env
