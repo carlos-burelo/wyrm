@@ -9,9 +9,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{
+        Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Sparkline, Table, Tabs, Wrap,
+    },
     Terminal,
 };
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -60,6 +63,10 @@ struct TuiState {
     cpu: f32,
     mem_used_gb: f64,
     mem_total_gb: f64,
+    cpu_hist: VecDeque<u64>,
+    mem_hist: VecDeque<u64>,
+    app_cpu_hist: HashMap<String, VecDeque<u64>>,
+    app_mem_hist: HashMap<String, VecDeque<u64>>,
 }
 
 impl TuiState {
@@ -84,6 +91,10 @@ impl TuiState {
             cpu: 0.0,
             mem_used_gb: 0.0,
             mem_total_gb: 0.0,
+            cpu_hist: VecDeque::with_capacity(61),
+            mem_hist: VecDeque::with_capacity(61),
+            app_cpu_hist: HashMap::new(),
+            app_mem_hist: HashMap::new(),
         }
     }
 
@@ -176,6 +187,21 @@ async fn refresh_apps(st: &mut TuiState) {
     if st.selected >= st.filtered().len() && !st.filtered().is_empty() {
         st.selected = st.filtered().len() - 1;
     }
+    // Historial global (60 puntos).
+    push_hist(&mut st.cpu_hist, st.cpu.max(0.0) as u64);
+    push_hist(&mut st.mem_hist, (st.mem_used_gb.max(0.0) * 1024.0) as u64);
+    // Historial por app (solo las visibles para no crecer sin cota).
+    for app in st.apps.clone() {
+        let (cpu_f, mem_mb) = app_live_metrics(&st.sys, app.pid);
+        push_hist(
+            st.app_cpu_hist.entry(app.name.clone()).or_default(),
+            cpu_f as u64,
+        );
+        push_hist(
+            st.app_mem_hist.entry(app.name.clone()).or_default(),
+            mem_mb as u64,
+        );
+    }
     // Preview del seleccionado para el panel derecho.
     if let Some(app) = st.selected_app() {
         let path = crate::db::Database::log_path_for(&app.name);
@@ -188,6 +214,23 @@ async fn refresh_apps(st: &mut TuiState) {
         }
     } else {
         st.preview_lines.clear();
+    }
+}
+
+fn push_hist(hist: &mut VecDeque<u64>, v: u64) {
+    if hist.len() >= 60 {
+        hist.pop_front();
+    }
+    hist.push_back(v);
+}
+
+fn app_live_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (f32, f64) {
+    let Some(pid) = pid else {
+        return (0.0, 0.0);
+    };
+    match sys.process(sysinfo::Pid::from_u32(pid)) {
+        Some(p) => (p.cpu_usage(), p.memory() as f64 / 1_048_576.0),
+        None => (0.0, 0.0),
     }
 }
 
@@ -473,17 +516,22 @@ fn draw_dashboard(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     }
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(area);
     draw_list(f, cols[0], st);
 
-    // Derecha: detalle arriba, preview logs abajo.
+    // Derecha: detalle, métricas con sparklines, preview logs.
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([
+            Constraint::Percentage(38),
+            Constraint::Percentage(32),
+            Constraint::Percentage(30),
+        ])
         .split(cols[1]);
     draw_detail(f, right[0], st);
-    draw_preview(f, right[1], st);
+    draw_metrics(f, right[1], st);
+    draw_preview(f, right[2], st);
 }
 
 fn draw_empty(f: &mut ratatui::Frame, area: Rect) {
@@ -582,6 +630,15 @@ fn draw_detail(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     };
     let (cpu, mem) = proc_metrics(&st.sys, app.pid);
     let log_path = crate::db::Database::log_path_for(&app.name);
+    let mem_pct = if st.mem_total_gb > 0.0 {
+        (st.mem_used_gb / st.mem_total_gb * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    let sys_line = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(5), Constraint::Length(1)])
+        .split(area);
     let lines = vec![
         Line::from(vec![
             Span::styled(
@@ -610,7 +667,65 @@ fn draw_detail(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         Paragraph::new(lines)
             .block(Block::default().title(" detalle ").borders(Borders::ALL))
             .wrap(Wrap { trim: false }),
-        area,
+        sys_line[0],
+    );
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default())
+            .gauge_style(Style::default().fg(Color::Green))
+            .ratio(mem_pct as f64 / 100.0)
+            .label(format!(
+                "SYS MEM {:.1}/{:.1} GB",
+                st.mem_used_gb, st.mem_total_gb
+            )),
+        sys_line[1],
+    );
+}
+
+fn draw_metrics(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+    let selected = st.selected_app().map(|a| a.name).unwrap_or_default();
+
+    let cpu_data: Vec<u64> = st
+        .app_cpu_hist
+        .get(&selected)
+        .map(|h| h.iter().copied().collect())
+        .unwrap_or_default();
+    let mem_data: Vec<u64> = st
+        .app_mem_hist
+        .get(&selected)
+        .map(|h| h.iter().copied().collect())
+        .unwrap_or_default();
+
+    let cpu_max = cpu_data.iter().copied().max().unwrap_or(100).max(10);
+    let mem_max = mem_data.iter().copied().max().unwrap_or(100).max(10);
+
+    f.render_widget(
+        Sparkline::default()
+            .block(
+                Block::default()
+                    .title(format!(" cpu%:{selected} (max {cpu_max}) "))
+                    .borders(Borders::ALL),
+            )
+            .data(&cpu_data)
+            .max(cpu_max)
+            .style(Style::default().fg(Color::Cyan)),
+        cols[0],
+    );
+    f.render_widget(
+        Sparkline::default()
+            .block(
+                Block::default()
+                    .title(format!(" mem MB:{selected} (max {mem_max}) "))
+                    .borders(Borders::ALL),
+            )
+            .data(&mem_data)
+            .max(mem_max)
+            .style(Style::default().fg(Color::Magenta)),
+        cols[1],
     );
 }
 
