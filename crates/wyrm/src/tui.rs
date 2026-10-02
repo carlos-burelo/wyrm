@@ -9,26 +9,47 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
     Terminal,
 };
 use std::io;
 use std::time::{Duration, Instant};
 
 #[derive(PartialEq, Clone, Copy)]
-enum View {
-    List,
+enum Tab {
+    Dashboard,
     Logs,
     Help,
+}
+
+impl Tab {
+    fn all() -> &'static [Tab] {
+        &[Tab::Dashboard, Tab::Logs, Tab::Help]
+    }
+    fn title(&self) -> &'static str {
+        match self {
+            Tab::Dashboard => " 1:Dashboard ",
+            Tab::Logs => " 2:Logs ",
+            Tab::Help => " 3:Help ",
+        }
+    }
+    fn next(self) -> Tab {
+        match self {
+            Tab::Dashboard => Tab::Logs,
+            Tab::Logs => Tab::Help,
+            Tab::Help => Tab::Dashboard,
+        }
+    }
 }
 
 struct TuiState {
     apps: Vec<AppStatus>,
     selected: usize,
-    view: View,
+    tab: Tab,
     log_name: String,
     log_lines: Vec<String>,
     log_scroll: usize,
+    preview_lines: Vec<String>,
     error: Option<String>,
     daemon_on: bool,
     filter: String,
@@ -48,10 +69,11 @@ impl TuiState {
         Self {
             apps: vec![],
             selected: 0,
-            view: View::List,
+            tab: Tab::Dashboard,
             log_name: String::new(),
             log_lines: vec![],
             log_scroll: 0,
+            preview_lines: vec![],
             error: None,
             daemon_on: false,
             filter: String::new(),
@@ -75,8 +97,11 @@ impl TuiState {
     }
 
     fn selected_app(&self) -> Option<AppStatus> {
-        self.filtered()
-            .get(self.selected.min(self.filtered().len().saturating_sub(1)))
+        let list = self.filtered();
+        if list.is_empty() {
+            return None;
+        }
+        list.get(self.selected.min(list.len() - 1))
             .map(|(_, a)| (*a).clone())
     }
 }
@@ -125,7 +150,6 @@ async fn refresh_apps(st: &mut TuiState) {
         }
         Err(_) => {
             st.daemon_on = false;
-            // Fallback DB.
             let db_rows: Vec<crate::db::AppRecord> = tokio::task::spawn_blocking(|| {
                 crate::db::Database::init()
                     .and_then(|db| db.list_apps())
@@ -152,6 +176,19 @@ async fn refresh_apps(st: &mut TuiState) {
     if st.selected >= st.filtered().len() && !st.filtered().is_empty() {
         st.selected = st.filtered().len() - 1;
     }
+    // Preview del seleccionado para el panel derecho.
+    if let Some(app) = st.selected_app() {
+        let path = crate::db::Database::log_path_for(&app.name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+            let n = lines.len().saturating_sub(12);
+            st.preview_lines = lines[n..].to_vec();
+        } else {
+            st.preview_lines = vec!["(sin logs todavía)".into()];
+        }
+    } else {
+        st.preview_lines.clear();
+    }
 }
 
 fn load_logs(st: &mut TuiState) {
@@ -161,8 +198,15 @@ fn load_logs(st: &mut TuiState) {
         .lines()
         .map(|s| s.to_string())
         .collect();
-    // Quedamos abajo por defecto.
     st.log_scroll = 0;
+}
+
+fn open_logs_for_selected(st: &mut TuiState) {
+    if let Some(app) = st.selected_app() {
+        st.log_name = app.name.clone();
+        load_logs(st);
+        st.tab = Tab::Logs;
+    }
 }
 
 async fn event_loop(
@@ -174,7 +218,6 @@ async fn event_loop(
 
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
-                // Modo filtro.
                 if st.filtering {
                     match key.code {
                         KeyCode::Esc | KeyCode::Enter => st.filtering = false,
@@ -190,7 +233,6 @@ async fn event_loop(
                     }
                     continue;
                 }
-                // Confirm delete.
                 if st.confirm_delete {
                     match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -205,30 +247,50 @@ async fn event_loop(
                     continue;
                 }
 
-                match st.view {
-                    View::List => match key.code {
+                // Tabs globales.
+                match key.code {
+                    KeyCode::Char('1') => {
+                        st.tab = Tab::Dashboard;
+                        continue;
+                    }
+                    KeyCode::Char('2') => {
+                        open_logs_for_selected(st);
+                        continue;
+                    }
+                    KeyCode::Char('3') => {
+                        st.tab = Tab::Help;
+                        continue;
+                    }
+                    KeyCode::Tab => {
+                        st.tab = st.tab.next();
+                        if st.tab == Tab::Logs && st.log_name.is_empty() {
+                            open_logs_for_selected(st);
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                match st.tab {
+                    Tab::Dashboard => match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('?') | KeyCode::Char('h') => st.view = View::Help,
+                        KeyCode::Char('?') | KeyCode::Char('h') => st.tab = Tab::Help,
                         KeyCode::Char('/') => st.filtering = true,
                         KeyCode::Down | KeyCode::Char('j') => {
                             let n = st.filtered().len();
                             if n > 0 {
                                 st.selected = (st.selected + 1) % n;
+                                refresh_preview(st);
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
                             let n = st.filtered().len();
                             if n > 0 {
                                 st.selected = st.selected.checked_sub(1).unwrap_or(n - 1);
+                                refresh_preview(st);
                             }
                         }
-                        KeyCode::Enter | KeyCode::Char('l') => {
-                            if let Some(app) = st.selected_app() {
-                                st.log_name = app.name.clone();
-                                load_logs(st);
-                                st.view = View::Logs;
-                            }
-                        }
+                        KeyCode::Enter | KeyCode::Char('l') => open_logs_for_selected(st),
                         KeyCode::Char('r') => {
                             if let Some(app) = st.selected_app() {
                                 st.error = Some(format!("Reiniciando {}…", app.name));
@@ -250,8 +312,8 @@ async fn event_loop(
                         }
                         _ => {}
                     },
-                    View::Logs => match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => st.view = View::List,
+                    Tab::Logs => match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') => st.tab = Tab::Dashboard,
                         KeyCode::Down | KeyCode::Char('j') => {
                             st.log_scroll = st.log_scroll.saturating_sub(1);
                             if st.log_scroll == 0 {
@@ -269,9 +331,9 @@ async fn event_loop(
                         }
                         _ => {}
                     },
-                    View::Help => match key.code {
+                    Tab::Help => match key.code {
                         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
-                            st.view = View::List
+                            st.tab = Tab::Dashboard
                         }
                         _ => {}
                     },
@@ -280,10 +342,30 @@ async fn event_loop(
         }
 
         if st.last_refresh.elapsed() > Duration::from_secs(2) {
+            let keep_selected = st.selected_app().map(|a| a.name);
             refresh_apps(st).await;
-            if st.view == View::Logs && st.log_scroll == 0 {
+            // Re-selecciona por nombre para que el refresh no salte si cambia el orden.
+            if let Some(name) = keep_selected {
+                if let Some(idx) = st.filtered().iter().position(|(_, a)| a.name == name) {
+                    st.selected = idx;
+                }
+            }
+            if st.tab == Tab::Logs && st.log_scroll == 0 && !st.log_name.is_empty() {
                 load_logs(st);
             }
+        }
+    }
+}
+
+fn refresh_preview(st: &mut TuiState) {
+    if let Some(app) = st.selected_app() {
+        let path = crate::db::Database::log_path_for(&app.name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+            let n = lines.len().saturating_sub(12);
+            st.preview_lines = lines[n..].to_vec();
+        } else {
+            st.preview_lines = vec!["(sin logs todavía)".into()];
         }
     }
 }
@@ -313,18 +395,20 @@ fn draw(f: &mut ratatui::Frame, st: &TuiState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(8),
             Constraint::Length(3),
         ])
         .split(f.area());
 
     draw_header(f, chunks[0], st);
-    match st.view {
-        View::List => draw_list(f, chunks[1], st),
-        View::Logs => draw_logs(f, chunks[1], st),
-        View::Help => draw_help(f, chunks[1]),
+    draw_tabs(f, chunks[1], st);
+    match st.tab {
+        Tab::Dashboard => draw_dashboard(f, chunks[2], st),
+        Tab::Logs => draw_logs(f, chunks[2], st),
+        Tab::Help => draw_help(f, chunks[2]),
     }
-    draw_footer(f, chunks[2], st);
+    draw_footer(f, chunks[3], st);
 }
 
 fn draw_header(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
@@ -333,6 +417,11 @@ fn draw_header(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     } else {
         Span::styled("● daemon off", Style::default().fg(Color::Red))
     };
+    let running = st
+        .apps
+        .iter()
+        .filter(|a| a.status.starts_with("RUNNING"))
+        .count();
     let title = Line::from(vec![
         Span::styled(
             " wyrm ",
@@ -344,10 +433,11 @@ fn draw_header(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         Span::raw("  "),
         daemon,
         Span::raw(format!(
-            "   CPU {:.1}%   MEM {:.1}/{:.1} GB   apps {}",
+            "   CPU {:.1}%   MEM {:.1}/{:.1} GB   {}/{} running",
             st.cpu,
             st.mem_used_gb,
             st.mem_total_gb,
+            running,
             st.apps.len()
         )),
         Span::raw(if st.filter.is_empty() {
@@ -362,12 +452,68 @@ fn draw_header(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     f.render_widget(Paragraph::new(title).block(block), area);
 }
 
+fn draw_tabs(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
+    let titles: Vec<Line> = Tab::all().iter().map(|t| Line::from(t.title())).collect();
+    let idx = Tab::all().iter().position(|t| *t == st.tab).unwrap_or(0);
+    let tabs = Tabs::new(titles)
+        .select(idx)
+        .style(Style::default().fg(Color::DarkGray))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        );
+    f.render_widget(tabs, area);
+}
+
+fn draw_dashboard(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
+    if st.apps.is_empty() {
+        draw_empty(f, area);
+        return;
+    }
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+    draw_list(f, cols[0], st);
+
+    // Derecha: detalle arriba, preview logs abajo.
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(cols[1]);
+    draw_detail(f, right[0], st);
+    draw_preview(f, right[1], st);
+}
+
+fn draw_empty(f: &mut ratatui::Frame, area: Rect) {
+    let text = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "Sin aplicaciones en supervisión",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("  wyrm start        # en tu proyecto Node (auto-detecta)"),
+        Line::from("  wyrm daemon       # arranca el demonio en dev"),
+        Line::from("  wyrm service install   # producción Windows Server"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Pulsa q para salir · ? ayuda",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(text)
+            .block(Block::default().title(" wyrm ").borders(Borders::ALL))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
 fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     let rows_data = st.filtered();
-    let header = Row::new(vec![
-        "NAME", "STATUS", "PID", "CPU%", "MEM", "RESTARTS", "UPTIME",
-    ])
-    .style(
+    let header = Row::new(vec!["NAME", "STATUS", "PID", "CPU%", "MEM"]).style(
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
@@ -387,14 +533,12 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
             Row::new(vec![
                 Cell::from(a.name.clone()),
                 Cell::from(Span::styled(
-                    a.status.clone(),
+                    short_status(&a.status),
                     Style::default().fg(status_color(&a.status)),
                 )),
                 Cell::from(a.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into())),
                 Cell::from(cpu),
                 Cell::from(mem),
-                Cell::from(a.restarts.to_string()),
-                Cell::from(fmt_uptime(a.uptime_secs)),
             ])
             .style(style)
             .height(1)
@@ -402,13 +546,11 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         .collect();
 
     let widths = [
-        Constraint::Percentage(22),
-        Constraint::Percentage(24),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(10),
-        Constraint::Length(10),
-        Constraint::Length(10),
+        Constraint::Percentage(30),
+        Constraint::Percentage(28),
+        Constraint::Length(7),
+        Constraint::Length(7),
+        Constraint::Length(9),
     ];
     let t = Table::new(rows, widths)
         .header(header)
@@ -419,6 +561,85 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
     f.render_widget(t, area);
+}
+
+fn short_status(s: &str) -> String {
+    if let Some((head, _)) = s.split_once(' ') {
+        head.to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn draw_detail(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
+    let Some(app) = st.selected_app() else {
+        f.render_widget(
+            Paragraph::new("Sin selección")
+                .block(Block::default().title(" detalle ").borders(Borders::ALL)),
+            area,
+        );
+        return;
+    };
+    let (cpu, mem) = proc_metrics(&st.sys, app.pid);
+    let log_path = crate::db::Database::log_path_for(&app.name);
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                app.name.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                app.status.clone(),
+                Style::default().fg(status_color(&app.status)),
+            ),
+        ]),
+        Line::from(format!(
+            "pid {}   cpu {}%   mem {}   restarts {}   uptime {}",
+            app.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+            cpu,
+            mem,
+            app.restarts,
+            fmt_uptime(app.uptime_secs)
+        )),
+        Line::from(format!("exec {}", app.executable)),
+        Line::from(format!("cwd  {}", app.cwd)),
+        Line::from(format!("log  {}", log_path.display())),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().title(" detalle ").borders(Borders::ALL))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn draw_preview(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
+    let items: Vec<ListItem> = st
+        .preview_lines
+        .iter()
+        .map(|l| ListItem::new(log_line_styled(l)))
+        .collect();
+    let title = match st.selected_app() {
+        Some(a) => format!(" preview:{} (enter=logs) ", a.name),
+        None => " preview ".into(),
+    };
+    f.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        area,
+    );
+}
+
+fn log_line_styled(line: &str) -> Line<'static> {
+    let owned = line.to_string();
+    let style = if owned.to_lowercase().contains("error") || owned.contains("FAIL") {
+        Style::default().fg(Color::Red)
+    } else if owned.to_lowercase().contains("warn") {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    Line::from(Span::styled(owned, style))
 }
 
 fn proc_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (String, String) {
@@ -456,7 +677,7 @@ fn draw_logs(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     let start = end.saturating_sub(height.max(1));
     let visible: Vec<ListItem> = st.log_lines[start..end]
         .iter()
-        .map(|l| ListItem::new(l.as_str()))
+        .map(|l| ListItem::new(log_line_styled(l)))
         .collect();
     let list = List::new(visible).block(
         Block::default()
@@ -471,18 +692,21 @@ fn draw_logs(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
 
 fn draw_help(f: &mut ratatui::Frame, area: Rect) {
     let text = vec![
-        Line::from("Wyrm TUI — ayuda"),
+        Line::from(Span::styled(
+            "Wyrm TUI — mejor que pm2 monit",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
-        Line::from("  j/k o ↑/↓   navegar"),
-        Line::from("  enter / l    ver logs"),
-        Line::from("  r            restart app seleccionada"),
-        Line::from("  s            stop app seleccionada"),
-        Line::from("  d luego y    delete app (confirma)"),
-        Line::from("  /            filtrar por nombre (esc sale)"),
-        Line::from("  ?            esta ayuda"),
-        Line::from("  q / esc      salir o volver"),
+        Line::from("  1/2/3 o tab    Dashboard / Logs / Help"),
+        Line::from("  j/k o ↑/↓      navegar apps o scroll logs"),
+        Line::from("  enter / l      ver logs de la app"),
+        Line::from("  r              restart"),
+        Line::from("  s              stop"),
+        Line::from("  d luego y      delete con confirmación"),
+        Line::from("  /              filtrar (enter/esc sale)"),
+        Line::from("  q / esc        salir o volver"),
         Line::from(""),
-        Line::from("Arranque: `wyrm daemon` en otra terminal o `wyrm service install`."),
+        Line::from("Arranque: `wyrm daemon` en dev o `wyrm service install` en Server."),
     ];
     f.render_widget(
         Paragraph::new(text)
@@ -504,10 +728,13 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     } else if st.filtering {
         format!("filtro: {} ▊  (enter/esc sale)", st.filter)
     } else {
-        match st.view {
-            View::List => " j/k mover · enter logs · r restart · s stop · d delete · / filtrar · ? ayuda · q salir ".into(),
-            View::Logs => " j/k scroll · r recargar · esc volver ".into(),
-            View::Help => " esc volver ".into(),
+        match st.tab {
+            Tab::Dashboard => {
+                " 1/2/3 tabs · j/k mover · enter logs · r restart · s stop · d delete · / filtrar · q salir "
+                    .into()
+            }
+            Tab::Logs => " j/k scroll · r recargar · esc volver ".into(),
+            Tab::Help => " esc volver ".into(),
         }
     };
     let style = if st.confirm_delete || st.error.is_some() {
