@@ -5,6 +5,8 @@
 //! (sin websockets todavía). Los retos `/.well-known/acme-challenge/*` se
 //! sirven desde `%ProgramData%/wyrm/certs/.http-01/` para `wyrm cert`.
 
+pub mod acme;
+
 use axum::{
     body::Body,
     extract::State,

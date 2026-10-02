@@ -2,6 +2,7 @@
 //!
 //! Cada subcomando vive en su módulo; `run()` despacha.
 
+pub mod cert;
 pub mod deploy;
 pub mod doctor;
 pub mod init;
@@ -106,6 +107,12 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
+    /// Certificados ACME: cert <issue|list|renew> [host] [--staging|--prod]
+    Cert {
+        action: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
+    },
     /// Proxy edge en foreground (WYRM_EDGE_PORT, default 80)
     Edge,
     /// Diagnóstico del entorno (node, demonio, servicio, disco, logs)
@@ -147,6 +154,7 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Rollback { name }) => deploy::cmd_rollback(&name).await?,
         Some(Commands::Token { rotate }) => token::cmd_token(rotate).await?,
         Some(Commands::Route { action, rest }) => route::cmd_route(&action, &rest).await?,
+        Some(Commands::Cert { action, rest }) => cert::cmd_cert(&action, &rest).await?,
         Some(Commands::Edge) => route::cmd_edge().await?,
         Some(Commands::Doctor) => doctor::cmd_doctor().await?,
         Some(Commands::Top) => crate::tui::run().await?,
