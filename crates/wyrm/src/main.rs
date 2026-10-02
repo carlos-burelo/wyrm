@@ -1,5 +1,6 @@
 mod cli;
 mod daemon;
+mod ecosystem;
 mod ipc;
 mod logs;
 mod runtime;

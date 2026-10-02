@@ -2,6 +2,7 @@
 //!
 //! Cada subcomando vive en su módulo; `run()` despacha.
 
+pub mod init;
 pub mod list;
 pub mod logs;
 pub mod manage;
@@ -34,6 +35,19 @@ pub enum Commands {
         name: Option<String>,
         #[arg(short, long)]
         cwd: Option<PathBuf>,
+        /// Inicia todas las apps de wyrm.json / ecosystem.json
+        #[arg(long, default_value_t = false)]
+        all: bool,
+        /// Ruta explícita al ecosystem file
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    /// Genera wyrm.json inspeccionando el proyecto actual
+    Init {
+        #[arg(short, long)]
+        name: Option<String>,
+        #[arg(long, default_value_t = false)]
+        force: bool,
     },
     /// Detiene una aplicación por nombre
     Stop { name: String },
@@ -70,7 +84,19 @@ pub enum Commands {
 
 pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
-        Some(Commands::Start { name, cwd }) => start::cmd_start(name, cwd).await?,
+        Some(Commands::Start {
+            name,
+            cwd,
+            all,
+            file,
+        }) => {
+            if all || file.is_some() {
+                start::cmd_start_all(file).await?
+            } else {
+                start::cmd_start(name, cwd).await?
+            }
+        }
+        Some(Commands::Init { name, force }) => init::cmd_init(name, force).await?,
         Some(Commands::Stop { name }) => manage::cmd_simple("STOP", &name).await?,
         Some(Commands::Restart { name }) => manage::cmd_simple("RESTART", &name).await?,
         Some(Commands::Delete { name, yes }) => manage::cmd_delete(&name, yes).await?,

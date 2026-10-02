@@ -27,3 +27,45 @@ pub async fn cmd_start(
     }
     Ok(())
 }
+
+/// `wyrm start --all`: levanta todas las apps del ecosystem file.
+pub async fn cmd_start_all(file: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let path = match file {
+        Some(p) => p,
+        None => crate::ecosystem::Ecosystem::find(&cwd).ok_or(
+            "No se encontró wyrm.json ni ecosystem.json en el directorio actual (usa --file).",
+        )?,
+    };
+    let base = path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| cwd.clone());
+    let eco = crate::ecosystem::Ecosystem::load(&path)?;
+    println!("Ecosystem {}: {} app(s)", path.display(), eco.apps.len());
+
+    let mut ok = 0;
+    for app in &eco.apps {
+        match crate::ecosystem::resolve(&base, app) {
+            Ok(cfg) => {
+                if let Ok(db) = crate::store::db::Database::init() {
+                    let _ = db.save_app(&cfg);
+                }
+                match crate::ipc::send_request("START", serde_json::to_value(&cfg)?).await {
+                    Ok(res) if res.is_ok() => {
+                        println!("OK {} -> {}", cfg.name, res.message);
+                        ok += 1;
+                    }
+                    Ok(res) => eprintln!("FAIL {}: {}", cfg.name, res.message),
+                    Err(e) => eprintln!(
+                        "FAIL {}: demonio no disponible ({e}); quedó guardada en DB.",
+                        cfg.name
+                    ),
+                }
+            }
+            Err(e) => eprintln!("FAIL {}: {e}", app.name),
+        }
+    }
+    println!("{ok}/{} apps iniciadas.", eco.apps.len());
+    Ok(())
+}
