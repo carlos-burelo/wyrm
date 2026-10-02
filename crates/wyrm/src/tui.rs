@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, Wrap},
     Terminal,
 };
 use std::io;
@@ -376,7 +376,7 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         .iter()
         .enumerate()
         .map(|(i, (_, a))| {
-            let (cpu, mem) = proc_metrics(a.pid);
+            let (cpu, mem) = proc_metrics(&st.sys, a.pid);
             let style = if i == st.selected {
                 Style::default()
                     .bg(Color::DarkGray)
@@ -385,13 +385,16 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
                 Style::default()
             };
             Row::new(vec![
-                a.name.clone(),
-                a.status.clone(),
-                a.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
-                cpu,
-                mem,
-                a.restarts.to_string(),
-                fmt_uptime(a.uptime_secs),
+                Cell::from(a.name.clone()),
+                Cell::from(Span::styled(
+                    a.status.clone(),
+                    Style::default().fg(status_color(&a.status)),
+                )),
+                Cell::from(a.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into())),
+                Cell::from(cpu),
+                Cell::from(mem),
+                Cell::from(a.restarts.to_string()),
+                Cell::from(fmt_uptime(a.uptime_secs)),
             ])
             .style(style)
             .height(1)
@@ -416,18 +419,20 @@ fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
     f.render_widget(t, area);
-
-    // Highlight de status con color se hace en footer/error; la tabla usa texto plano
-    // para mantener el layout estable.
-    let _ = status_color;
 }
 
-fn proc_metrics(pid: Option<u32>) -> (String, String) {
-    // Métricas best-effort sin bloquear el render: leemos sysinfo fresco por llamada
-    // sería caro; aquí devolvemos "-" y el header global ya trae CPU/MEM.
-    // (Métricas por proceso llegan en el siguiente commit de polish.)
-    let _ = pid;
-    ("-".into(), "-".into())
+fn proc_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (String, String) {
+    let Some(pid) = pid else {
+        return ("-".into(), "-".into());
+    };
+    let id = sysinfo::Pid::from_u32(pid);
+    match sys.process(id) {
+        Some(p) => (
+            format!("{:.1}", p.cpu_usage()),
+            format!("{:.0}M", p.memory() as f64 / 1_048_576.0),
+        ),
+        None => ("-".into(), "-".into()),
+    }
 }
 
 fn fmt_uptime(secs: u64) -> String {
