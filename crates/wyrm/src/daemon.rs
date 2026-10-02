@@ -409,6 +409,15 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+pub fn blocking_handler(daemon: Arc<Daemon>) -> crate::ipc::Handler {
+    std::sync::Arc::new(move |req: Request| {
+        let d = daemon.clone();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(d.handle(req))
+        })
+    })
+}
+
 /// Punto de entrada del demonio en foreground (`wyrm daemon`).
 pub async fn run_foreground() -> Result<(), Box<dyn std::error::Error>> {
     let daemon = Daemon::new();
@@ -416,12 +425,7 @@ pub async fn run_foreground() -> Result<(), Box<dyn std::error::Error>> {
     let d2 = daemon.clone();
     tokio::spawn(async move { d2.supervise().await });
 
-    let handler: crate::ipc::Handler = std::sync::Arc::new(move |req: Request| {
-        let d = daemon.clone();
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(d.handle(req))
-        })
-    });
+    let handler = blocking_handler(daemon);
 
     println!("Wyrm daemon escuchando en {}", crate::ipc::PIPE_NAME);
     crate::ipc::run_ipc_server_with(handler).await

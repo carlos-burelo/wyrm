@@ -62,6 +62,21 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub fn uninstall_service() -> Result<(), Box<dyn std::error::Error>> {
+    let manager = ServiceManager::local_computer(
+        None::<&str>,
+        ServiceManagerAccess::CONNECT,
+    )?;
+    let service = manager.open_service(
+        SERVICE_NAME,
+        ServiceAccess::DELETE | ServiceAccess::STOP | ServiceAccess::QUERY_STATUS,
+    )?;
+    let _ = service.stop();
+    service.delete()?;
+    println!("Servicio {SERVICE_NAME} desinstalado.");
+    Ok(())
+}
+
 pub fn start_service_dispatcher() -> Result<(), windows_service::Error> {
     service_dispatcher::start(SERVICE_NAME, ffi_service_main)
 }
@@ -85,9 +100,17 @@ fn my_service_main(_arguments: Vec<OsString>) {
             process_id: None,
         });
 
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         runtime.block_on(async {
-            let _ = crate::ipc::run_ipc_server().await;
+            let daemon = crate::daemon::Daemon::new();
+            daemon.restore_from_db().await;
+            let d2 = daemon.clone();
+            tokio::spawn(async move { d2.supervise().await });
+            let handler = crate::daemon::blocking_handler(daemon);
+            let _ = crate::ipc::run_ipc_server_with(handler).await;
         });
 
         let _ = status_handle.set_service_status(ServiceStatus {
