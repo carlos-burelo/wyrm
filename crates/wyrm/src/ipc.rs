@@ -38,19 +38,6 @@ pub async fn send_request(
     Ok(resp)
 }
 
-/// Compat: devuelve string legible para la CLI vieja.
-pub async fn send_command(
-    action: &str,
-    payload: serde_json::Value,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let r = send_request(action, payload).await?;
-    if r.is_ok() {
-        Ok(r.data.map(|d| d.to_string()).unwrap_or(r.message))
-    } else {
-        Err(r.message.into())
-    }
-}
-
 pub type Handler = Arc<dyn Fn(Request) -> Response + Send + Sync + 'static>;
 
 pub async fn run_ipc_server_with(handler: Handler) -> Result<(), Box<dyn std::error::Error>> {
@@ -88,10 +75,4 @@ pub async fn run_ipc_server_with(handler: Handler) -> Result<(), Box<dyn std::er
             let _ = server.disconnect();
         });
     }
-}
-
-/// Servidor dummy para compatibilidad cuando no hay daemon (eco).
-pub async fn run_ipc_server() -> Result<(), Box<dyn std::error::Error>> {
-    let echo: Handler = Arc::new(|req: Request| Response::ok(&req.action, req.payload));
-    run_ipc_server_with(echo).await
 }

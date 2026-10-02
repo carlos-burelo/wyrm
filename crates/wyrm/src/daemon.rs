@@ -4,7 +4,7 @@ use crate::protocol::{Request, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -419,13 +419,6 @@ fn persist_status(name: &str, status: &str, inc: bool) {
             let _ = db.update_status(&name, &status, inc);
         }
     });
-}
-
-pub fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 pub fn blocking_handler(daemon: Arc<Daemon>) -> crate::ipc::Handler {

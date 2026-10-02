@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, Result, Row};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppRecord {
@@ -164,17 +164,5 @@ impl Database {
             )?;
         }
         Ok(())
-    }
-
-    pub fn reset_restarts(&self, name: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE apps SET restarts = 0 WHERE name = ?1",
-            params![name],
-        )?;
-        Ok(())
-    }
-
-    pub fn data_dir_exists(path: &Path) -> bool {
-        path.exists()
     }
 }

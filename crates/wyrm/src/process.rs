@@ -1,5 +1,4 @@
 use std::fs::OpenOptions;
-use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::JobObjects::{
@@ -87,57 +86,4 @@ pub fn spawn_managed(
     }
 
     Ok(ManagedChild { child, _job: job })
-}
-
-/// Compat con la API vieja (tests / otros módulos).
-pub struct ProcessGuard {
-    job: Option<JobHandle>,
-}
-
-impl ProcessGuard {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(Self {
-            job: Some(create_job()?),
-        })
-    }
-
-    pub fn spawn_managed(
-        &self,
-        config: &crate::inspector::AppConfig,
-    ) -> Result<std::process::Child, Box<dyn std::error::Error + Send + Sync>> {
-        let log_path = crate::db::Database::log_path_for(&config.name);
-        if let Some(parent) = log_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        let log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
-        let err_file = log_file.try_clone()?;
-
-        let mut cmd = std::process::Command::new(&config.executable);
-        cmd.args(&config.args)
-            .current_dir(&config.cwd)
-            .envs(&config.env)
-            .stdout(log_file)
-            .stderr(err_file);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        let child = cmd.spawn()?;
-        if let Some(job) = &self.job {
-            unsafe {
-                let process_handle = HANDLE(child.as_raw_handle());
-                AssignProcessToJobObject(job.0, process_handle)?;
-            }
-        }
-        Ok(child)
-    }
-
-    pub fn log_path_for(name: &str) -> std::path::PathBuf {
-        crate::db::Database::log_path_for(name)
-    }
 }
