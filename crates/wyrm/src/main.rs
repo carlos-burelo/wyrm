@@ -1,13 +1,14 @@
 mod daemon;
-mod inspector;
 mod ipc;
-mod process;
 mod protocol;
-mod service;
+mod runtime;
 mod store;
 mod tui;
 
 // Shims temporales durante la migración a full layout (se eliminan al final).
+pub(crate) use runtime::inspector;
+pub(crate) use runtime::process;
+pub(crate) use runtime::service;
 pub(crate) use store::db;
 
 use clap::{Parser, Subcommand};
