@@ -59,6 +59,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Upload binary for npm tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: wyrm-windows-x64
+          path: dist/wyrm-x86_64-pc-windows-msvc.exe
+          if-no-files-found: error
+
   publish-npm:
     name: Publish Wrapper to npm
     needs: build-rust
@@ -84,7 +91,19 @@ jobs:
           echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
           cd npm
           npm version "$TAG_VERSION" --no-git-tag-version
-          node -e "const m=require('./scripts/install.js'); console.log('install check:', m.assetName(m.targetTriple()), 'v'+m.pkgVersion())"
+
+      - name: Stage vendor binary from build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wyrm-windows-x64
+          path: npm/vendor-staging
+
+      - name: Verify staged binary
+        run: |
+          mkdir -p npm/vendor
+          cp npm/vendor-staging/wyrm-x86_64-pc-windows-msvc.exe npm/vendor/wyrm.exe
+          ls -la npm/vendor
+          test -s npm/vendor/wyrm.exe
 
       - name: Publish to npm (idempotente)
         run: |

@@ -13,6 +13,7 @@
 
 ```powershell
 npm install -g @carlos-burelo/wyrm
+# también pnpm/yarn/bun: el tarball trae el binario, sin postinstall
 ```
 
 O desde fuente:
@@ -221,8 +222,8 @@ git push origin v0.1.0
 
 CI hace: `cargo test` → build x64 release → GitHub Release con
 `wyrm-x86_64-pc-windows-msvc.exe` + `.sha256` → sync de versión en
-`npm/package.json` → `npm publish`. El `postinstall` descarga el asset de
-tu misma versión y verifica SHA256.
+`npm/package.json` → mete el exe en `npm/vendor/` → `npm publish`.
+El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
 
 Requisitos: secret `NPM_TOKEN` en el repo. Verificación local previa:
 
