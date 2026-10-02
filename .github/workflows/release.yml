@@ -81,13 +81,18 @@ jobs:
             exit 1
           fi
           TAG_VERSION="${TAG#v}"
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
           cd npm
           npm version "$TAG_VERSION" --no-git-tag-version
           node -e "const m=require('./scripts/install.js'); console.log('install check:', m.assetName(m.targetTriple()), 'v'+m.pkgVersion())"
 
-      - name: Publish to npm
+      - name: Publish to npm (idempotente)
         run: |
           cd npm
-          npm publish --access public
+          if npm view "wyrm@$TAG_VERSION" version 2>/dev/null; then
+            echo "wyrm@$TAG_VERSION ya publicado, skip."
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
