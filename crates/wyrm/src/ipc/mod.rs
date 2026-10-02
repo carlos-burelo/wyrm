@@ -1,4 +1,6 @@
-use crate::protocol::{Request, Response};
+pub mod protocol;
+
+use super::protocol::{Request, Response};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
