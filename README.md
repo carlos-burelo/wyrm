@@ -210,6 +210,28 @@ crates/wyrm/src:
 - **Primer release solo x64 Windows** (sin binario ARM64).
 - **Healthcheck TLS** con roots embebidos (sin CAs corporativas custom).
 
+## Release (mantenedores)
+
+Todo automático al pushear un tag `vX.Y.Z`:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+CI hace: `cargo test` → build x64 release → GitHub Release con
+`wyrm-x86_64-pc-windows-msvc.exe` + `.sha256` → sync de versión en
+`npm/package.json` → `npm publish`. El `postinstall` descarga el asset de
+tu misma versión y verifica SHA256.
+
+Requisitos: secret `NPM_TOKEN` en el repo. Verificación local previa:
+
+```powershell
+cargo test -p wyrm
+node --check npm/scripts/install.js
+npm pack --dry-run  # en npm/: confirma 4 archivos, sin vendor/
+```
+
 ## Desarrollo
 
 ```powershell
