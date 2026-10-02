@@ -50,6 +50,23 @@ wyrm logs mi-app --follow
 wyrm delete mi-app --yes
 ```
 
+Multi-app con ecosystem file:
+
+```powershell
+wyrm init              # genera wyrm.json del proyecto actual
+wyrm start --all       # levanta todas las apps (wyrm.json o ecosystem.json)
+wyrm start --all --file ./prod.json
+```
+
+`wyrm.json`:
+
+```json
+{ "apps": [{ "name": "web", "cwd": ".", "env": { "PORT": "3000" } }] }
+```
+
+`executable`/`args` opcionales: si faltan se auto-detectan. `cwd` relativo
+al archivo. El `env` del archivo gana sobre `.env`.
+
 Servicio Windows (producción):
 
 ```powershell
@@ -92,15 +109,15 @@ CLI (clap) ──Named Pipe NDJSON──> Daemon
   └─ fallback DB (SQLite) si demonio off
 
 crates/wyrm/src:
-  main.rs      CLI + tablas
-  daemon.rs    supervisor
-  ipc.rs       cliente/servidor pipe
-  protocol.rs  Request/Response
-  process.rs   spawn con Job + logs
-  db.rs        CRUD SQLite
-  inspector.rs auto-detect Node/Next/Astro
-  service.rs   install/uninstall + SCM dispatcher
-  tui.rs       Ratatui dashboard
+  main.rs      bootstrap (16 líneas)
+  cli/         args + start/manage/list/status/logs/init
+  ecosystem/   wyrm.json multi-app
+  daemon/      state + supervisor + supervise loop
+  ipc/         pipe + protocol Request/Response
+  store/       SQLite (db) + paths
+  runtime/     inspector/process/service Windows
+  logs/        read/tail/flush compartido cli+tui
+  tui/         state/data/actions/events/theme/views
 ```
 
 ## Desarrollo
