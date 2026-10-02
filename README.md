@@ -194,6 +194,22 @@ crates/wyrm/src:
   tui/         state/data/actions/events/theme/views
 ```
 
+## Límites conocidos (honestos)
+
+- **ACME real sin probar E2E**: `cert issue --prod` requiere DNS público
+  apuntando al servidor + `wyrm edge` en :80. Usa `--staging` primero.
+- **Proxy HTTP bufferizado**: sin websockets, cuerpo máximo 16 MB.
+- **Expiración de certs estimada**: `meta.json` asume 90 días (no parse X.509).
+- **Stop en Windows = terminate**: `stop_timeout_secs` es ventana de espera;
+  CTRL+BREAK elegante queda futuro.
+- **Policies fuera de SQLite**: viven en `wyrm.json`/payload `START`;
+  el restore tras reinicio usa defaults.
+- **API solo loopback** (`127.0.0.1:8379`); el token vive en archivo con los
+  permisos del FS del SO.
+- **Single-node**: un demonio por pipe, sin clustering multi-máquina.
+- **Primer release solo x64 Windows** (sin binario ARM64).
+- **Healthcheck TLS** con roots embebidos (sin CAs corporativas custom).
+
 ## Desarrollo
 
 ```powershell
