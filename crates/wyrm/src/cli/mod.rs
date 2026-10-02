@@ -2,6 +2,7 @@
 //!
 //! Cada subcomando vive en su módulo; `run()` despacha.
 
+pub mod doctor;
 pub mod init;
 pub mod list;
 pub mod logs;
@@ -76,6 +77,8 @@ pub enum Commands {
     },
     /// Ejecuta el demonio en foreground (para debug / sin servicio)
     Daemon,
+    /// Diagnóstico del entorno (node, demonio, servicio, disco, logs)
+    Doctor,
     /// TUI interactiva de primer nivel
     Top,
     /// Administra el servicio de Windows (install / uninstall)
@@ -108,6 +111,7 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             follow,
         }) => logs::cmd_logs(&name, lines, follow).await?,
         Some(Commands::Daemon) => crate::daemon::run_foreground().await?,
+        Some(Commands::Doctor) => doctor::cmd_doctor().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {
             "install" => crate::runtime::service::install_service()?,
