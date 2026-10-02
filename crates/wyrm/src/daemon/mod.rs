@@ -326,6 +326,10 @@ pub async fn run_foreground() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move { d2.supervise().await });
     let d3 = daemon.clone();
     tokio::spawn(async move { health::health_loop(d3).await });
+    let d4 = daemon.clone();
+    tokio::spawn(async move {
+        let _ = crate::api::serve(d4).await;
+    });
 
     let handler = blocking_handler(daemon);
 

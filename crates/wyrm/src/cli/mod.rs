@@ -10,6 +10,7 @@ pub mod logs;
 pub mod manage;
 pub mod start;
 pub mod status;
+pub mod token;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -93,6 +94,11 @@ pub enum Commands {
     },
     /// Vuelve al último deploy ok (git reset + restart)
     Rollback { name: String },
+    /// Muestra o rota el token Bearer de la API local
+    Token {
+        #[arg(long, default_value_t = false)]
+        rotate: bool,
+    },
     /// Diagnóstico del entorno (node, demonio, servicio, disco, logs)
     Doctor,
     /// TUI interactiva de primer nivel
@@ -130,6 +136,7 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Deploy { name, ref_ }) => deploy::cmd_deploy(&name, ref_).await?,
         Some(Commands::Releases { name, limit }) => deploy::cmd_releases(&name, limit).await?,
         Some(Commands::Rollback { name }) => deploy::cmd_rollback(&name).await?,
+        Some(Commands::Token { rotate }) => token::cmd_token(rotate).await?,
         Some(Commands::Doctor) => doctor::cmd_doctor().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {

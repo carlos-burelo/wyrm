@@ -111,6 +111,10 @@ fn my_service_main(_arguments: Vec<OsString>) {
             tokio::spawn(async move { d2.supervise().await });
             let d3 = daemon.clone();
             tokio::spawn(async move { crate::daemon::health::health_loop(d3).await });
+            let d4 = daemon.clone();
+            tokio::spawn(async move {
+                let _ = crate::api::serve(d4).await;
+            });
             let handler = crate::daemon::blocking_handler(daemon);
             let _ = crate::ipc::run_ipc_server_with(handler).await;
         });
