@@ -1,0 +1,34 @@
+{
+  "name": "wyrm",
+  "version": "1.0.0",
+  "description": "El gestor de procesos definitivo para Windows Server escrito en Rust",
+  "main": "bin/cli.js",
+  "bin": {
+    "wyrm": "bin/cli.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlos-burelo/wyrm.git"
+  },
+  "keywords": [
+    "wyrm",
+    "pm2",
+    "windows-server",
+    "rust",
+    "process-manager",
+    "nextjs",
+    "astro"
+  ],
+  "author": "Carlos Burelo",
+  "license": "MIT"
+}
