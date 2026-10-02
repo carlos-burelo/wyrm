@@ -58,6 +58,10 @@ struct TuiState {
     filter: String,
     filtering: bool,
     confirm_delete: bool,
+    confirm_flush: bool,
+    log_follow: bool,
+    log_query: String,
+    log_searching: bool,
     last_refresh: Instant,
     sys: sysinfo::System,
     cpu: f32,
@@ -86,6 +90,10 @@ impl TuiState {
             filter: String::new(),
             filtering: false,
             confirm_delete: false,
+            confirm_flush: false,
+            log_follow: true,
+            log_query: String::new(),
+            log_searching: false,
             last_refresh: Instant::now() - Duration::from_secs(10),
             sys,
             cpu: 0.0,
@@ -241,12 +249,24 @@ fn load_logs(st: &mut TuiState) {
         .lines()
         .map(|s| s.to_string())
         .collect();
+    if st.log_follow {
+        st.log_scroll = 0;
+    }
+}
+
+fn flush_logs(st: &mut TuiState) {
+    let path = crate::db::Database::log_path_for(&st.log_name);
+    let _ = std::fs::write(&path, "");
+    st.log_lines.clear();
     st.log_scroll = 0;
+    st.error = Some(format!("Logs de {} vaciados", st.log_name));
 }
 
 fn open_logs_for_selected(st: &mut TuiState) {
     if let Some(app) = st.selected_app() {
         st.log_name = app.name.clone();
+        st.log_follow = true;
+        st.log_scroll = 0;
         load_logs(st);
         st.tab = Tab::Logs;
     }
@@ -286,6 +306,30 @@ async fn event_loop(
                             }
                         }
                         _ => st.confirm_delete = false,
+                    }
+                    continue;
+                }
+
+                if st.log_searching {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Enter => st.log_searching = false,
+                        KeyCode::Backspace => {
+                            st.log_query.pop();
+                        }
+                        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            st.log_query.push(c);
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+                if st.confirm_flush {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            st.confirm_flush = false;
+                            flush_logs(st);
+                        }
+                        _ => st.confirm_flush = false,
                     }
                     continue;
                 }
@@ -356,21 +400,44 @@ async fn event_loop(
                         _ => {}
                     },
                     Tab::Logs => match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') => st.tab = Tab::Dashboard,
+                        KeyCode::Esc => {
+                            if st.log_query.is_empty() {
+                                st.tab = Tab::Dashboard;
+                            } else {
+                                st.log_query.clear();
+                            }
+                        }
+                        KeyCode::Char('q') => st.tab = Tab::Dashboard,
                         KeyCode::Down | KeyCode::Char('j') => {
+                            st.log_follow = false;
                             st.log_scroll = st.log_scroll.saturating_sub(1);
                             if st.log_scroll == 0 {
                                 load_logs(st);
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
+                            st.log_follow = false;
                             load_logs(st);
                             st.log_scroll =
                                 (st.log_scroll + 1).min(st.log_lines.len().saturating_sub(1));
                         }
+                        KeyCode::Char('f') => {
+                            st.log_follow = !st.log_follow;
+                            if st.log_follow {
+                                load_logs(st);
+                            }
+                        }
+                        KeyCode::Char('/') => st.log_searching = true,
+                        KeyCode::Char('F') => st.confirm_flush = true,
                         KeyCode::Char('r') => {
                             load_logs(st);
-                            st.log_scroll = 0;
+                            if st.log_follow {
+                                st.log_scroll = 0;
+                            }
+                        }
+                        KeyCode::Char('G') => {
+                            st.log_follow = true;
+                            load_logs(st);
                         }
                         _ => {}
                     },
@@ -393,7 +460,7 @@ async fn event_loop(
                     st.selected = idx;
                 }
             }
-            if st.tab == Tab::Logs && st.log_scroll == 0 && !st.log_name.is_empty() {
+            if st.tab == Tab::Logs && st.log_follow && !st.log_name.is_empty() {
                 load_logs(st);
             }
         }
@@ -746,15 +813,52 @@ fn draw_preview(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
 }
 
 fn log_line_styled(line: &str) -> Line<'static> {
-    let owned = line.to_string();
-    let style = if owned.to_lowercase().contains("error") || owned.contains("FAIL") {
-        Style::default().fg(Color::Red)
-    } else if owned.to_lowercase().contains("warn") {
+    log_line_styled_query(line, "")
+}
+
+fn log_line_styled_query(line: &str, query: &str) -> Line<'static> {
+    let lower = line.to_lowercase();
+    let base = if lower.contains("error")
+        || lower.contains("fail")
+        || lower.contains("crash")
+        || lower.contains("panic")
+        || lower.contains("exception")
+    {
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    } else if lower.contains("warn") {
         Style::default().fg(Color::Yellow)
+    } else if lower.contains("ok")
+        || lower.contains("success")
+        || lower.contains("listening")
+        || lower.contains("ready")
+        || lower.contains("start")
+    {
+        Style::default().fg(Color::Green)
+    } else if lower.contains("debug") || lower.contains("trace") {
+        Style::default().fg(Color::DarkGray)
     } else {
         Style::default().fg(Color::Gray)
     };
-    Line::from(Span::styled(owned, style))
+    if query.is_empty() {
+        return Line::from(Span::styled(line.to_string(), base));
+    }
+    // Resalta ocurrencias del query con fondo amarillo.
+    let ql = query.to_lowercase();
+    if let Some(pos) = lower.find(&ql) {
+        let end = (pos + query.len()).min(line.len());
+        // Ojo: índices byte, válido para ASCII (queries típicos). Fallback simple.
+        if line.is_ascii() {
+            return Line::from(vec![
+                Span::styled(line[..pos].to_string(), base),
+                Span::styled(
+                    line[pos..end].to_string(),
+                    base.bg(Color::Yellow).fg(Color::Black),
+                ),
+                Span::styled(line[end..].to_string(), base),
+            ]);
+        }
+    }
+    Line::from(Span::styled(line.to_string(), base))
 }
 
 fn proc_metrics(sys: &sysinfo::System, pid: Option<u32>) -> (String, String) {
@@ -786,22 +890,48 @@ fn fmt_uptime(secs: u64) -> String {
 }
 
 fn draw_logs(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
-    let total = st.log_lines.len();
+    let q = st.log_query.to_lowercase();
+    let filtered: Vec<&String> = if q.is_empty() {
+        st.log_lines.iter().collect()
+    } else {
+        st.log_lines
+            .iter()
+            .filter(|l| l.to_lowercase().contains(&q))
+            .collect()
+    };
+    let total = filtered.len();
     let height = area.height.saturating_sub(2) as usize;
     let end = total.saturating_sub(st.log_scroll);
     let start = end.saturating_sub(height.max(1));
-    let visible: Vec<ListItem> = st.log_lines[start..end]
+    let visible: Vec<ListItem> = filtered[start..end]
         .iter()
-        .map(|l| ListItem::new(log_line_styled(l)))
+        .map(|l| ListItem::new(log_line_styled_query(l, &st.log_query)))
         .collect();
-    let list = List::new(visible).block(
-        Block::default()
-            .title(format!(
-                " logs:{} ({} líneas, j/k scroll, r recargar, esc volver) ",
-                st.log_name, total
-            ))
-            .borders(Borders::ALL),
-    );
+    let follow = if st.log_follow {
+        "●follow"
+    } else {
+        "○follow(f)"
+    };
+    let title =
+        if st.log_searching {
+            format!(" buscar: {}▊  (enter/esc sale) ", st.log_query)
+        } else if st.confirm_flush {
+            format!("¿Vaciar logs de {}? y=sí otra=no", st.log_name)
+        } else if !st.log_query.is_empty() {
+            format!(
+                " logs:{} [{}/{} filtradas, {}] (/ buscar, esc limpiar) ",
+                st.log_name,
+                total,
+                st.log_lines.len(),
+                follow
+            )
+        } else {
+            format!(
+            " logs:{} ({} líneas, {}) j/k scroll · f follow · / buscar · F vaciar · esc volver ",
+            st.log_name, st.log_lines.len(), follow
+        )
+        };
+    let list = List::new(visible).block(Block::default().title(title).borders(Borders::ALL));
     f.render_widget(list, area);
 }
 
@@ -816,9 +946,13 @@ fn draw_help(f: &mut ratatui::Frame, area: Rect) {
         Line::from("  j/k o ↑/↓      navegar apps o scroll logs"),
         Line::from("  enter / l      ver logs de la app"),
         Line::from("  r              restart"),
-        Line::from("  s              stop"),
+        Line::from("  s / S          stop / start (revive STOPPED desde DB)"),
         Line::from("  d luego y      delete con confirmación"),
-        Line::from("  /              filtrar (enter/esc sale)"),
+        Line::from("  o              ciclo orden: nombre → cpu → mem → uptime → restarts"),
+        Line::from("  /              filtrar apps (dashboard) o buscar en logs"),
+        Line::from("  f              follow on/off en logs"),
+        Line::from("  F luego y      vaciar log actual"),
+        Line::from("  G              ir al final (follow)"),
         Line::from("  q / esc        salir o volver"),
         Line::from(""),
         Line::from("Arranque: `wyrm daemon` en dev o `wyrm service install` en Server."),
@@ -838,21 +972,27 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         } else {
             "¿Eliminar?".into()
         }
+    } else if st.confirm_flush {
+        format!("¿Vaciar logs de {}?  y=sí  otra tecla=no", st.log_name)
     } else if let Some(e) = &st.error {
         format!("! {e}")
     } else if st.filtering {
         format!("filtro: {} ▊  (enter/esc sale)", st.filter)
+    } else if st.log_searching {
+        format!("buscar en logs: {}▊  (enter/esc sale)", st.log_query)
     } else {
         match st.tab {
             Tab::Dashboard => {
-                " 1/2/3 tabs · j/k mover · enter logs · r restart · s stop · d delete · / filtrar · q salir "
+                " 1/2/3 tabs · j/k mover · enter logs · r restart · s stop · S start · d delete · o orden · / filtrar · q salir "
                     .into()
             }
-            Tab::Logs => " j/k scroll · r recargar · esc volver ".into(),
+            Tab::Logs => {
+                " j/k scroll · f follow · / buscar · F vaciar · G final · r recargar · esc volver ".into()
+            }
             Tab::Help => " esc volver ".into(),
         }
     };
-    let style = if st.confirm_delete || st.error.is_some() {
+    let style = if st.confirm_delete || st.confirm_flush || st.error.is_some() {
         Style::default().fg(Color::Red)
     } else {
         Style::default().fg(Color::DarkGray)
