@@ -6,7 +6,7 @@ use ratatui::{
 pub(crate) fn status_color(s: &str) -> Color {
     if s.starts_with("RUNNING") {
         Color::Green
-    } else if s.starts_with("CRASHED") {
+    } else if s.starts_with("CRASHED") || s.starts_with("ERRORED") {
         Color::Red
     } else if s.contains("off") {
         Color::DarkGray

@@ -13,6 +13,7 @@ impl Daemon {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             let mut to_restart: Vec<AppConfig> = Vec::new();
+            let mut errored: Vec<String> = Vec::new();
             {
                 let mut guard = self.apps.lock().await;
                 for app in guard.values_mut() {
@@ -23,11 +24,35 @@ impl Daemon {
                         match child.child.try_wait() {
                             Ok(Some(exit)) => {
                                 let code = exit.code();
-                                eprintln!(
-                                    "[wyrm] {} salió (code={:?}), reiniciando…",
-                                    app.config.name, code
-                                );
+                                let uptime = app
+                                    .started_at
+                                    .and_then(|t| t.elapsed().ok())
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let min = app.config.policy.min_uptime_secs;
+                                let max = app.config.policy.max_restarts;
+                                if uptime < min {
+                                    app.unstable += 1;
+                                } else {
+                                    app.unstable = 0;
+                                }
                                 app.child = None;
+                                if app.unstable >= max {
+                                    eprintln!(
+                                        "[wyrm] {} en crash-loop ({} salidas < {}s), ERRORED: `wyrm restart {}` para reintentar",
+                                        app.config.name,
+                                        app.unstable,
+                                        min,
+                                        app.config.name
+                                    );
+                                    app.status = "ERRORED".to_string();
+                                    errored.push(app.config.name.clone());
+                                    continue;
+                                }
+                                eprintln!(
+                                    "[wyrm] {} salió (code={:?}, uptime {}s), reiniciando…",
+                                    app.config.name, code, uptime
+                                );
                                 app.status = "CRASHED".to_string();
                                 app.crash_count += 1;
                                 // Backoff: 1s * crash_count hasta 30s.
@@ -50,6 +75,9 @@ impl Daemon {
                         }
                     }
                 }
+            }
+            for name in errored {
+                persist_status(&name, "ERRORED", false);
             }
             for cfg in to_restart {
                 let name = cfg.name.clone();

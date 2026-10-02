@@ -54,7 +54,7 @@ fn print_table(rows: &[crate::daemon::AppStatus]) {
         let status = match r.status.as_str() {
             s if s.starts_with("RUNNING") => s.green().to_string(),
             s if s.starts_with("STOPPED") => s.dimmed().to_string(),
-            s if s.starts_with("CRASHED") => s.red().bold().to_string(),
+            s if s.starts_with("CRASHED") || s.starts_with("ERRORED") => s.red().bold().to_string(),
             s => s.yellow().to_string(),
         };
         let pid = r.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into());

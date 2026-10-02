@@ -123,6 +123,7 @@ impl Daemon {
                 app.status = "RUNNING".to_string();
                 app.started_at = Some(SystemTime::now());
                 app.last_heartbeat = SystemTime::now();
+                app.unstable = 0;
                 drop(guard);
                 persist_status(&name, "RUNNING", false);
                 Response::ok(
@@ -147,12 +148,16 @@ impl Daemon {
             return Response::err(format!("App desconocida: {name}"));
         };
         if let Some(mut child) = app.child.take() {
+            // Ventana de gracia configurable antes de dar por muerto al proceso.
+            // Nota Windows: el stop es terminate; CTRL+BREAK elegante queda futuro.
+            let timeout = app.config.policy.stop_timeout_secs.max(1);
             let _ = child.child.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(5), child.child.wait()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(timeout), child.child.wait()).await;
         }
         app.status = "STOPPED".to_string();
         app.started_at = None;
         app.crash_count = 0;
+        app.unstable = 0;
         drop(guard);
         persist_status(name, "STOPPED", false);
         Response::ok(
@@ -184,6 +189,7 @@ impl Daemon {
                 app.status = "RUNNING".to_string();
                 app.started_at = Some(SystemTime::now());
                 app.restarts += 1;
+                app.unstable = 0;
                 let restarts = app.restarts;
                 drop(guard);
                 persist_status(name, "RUNNING", true);
