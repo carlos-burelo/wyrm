@@ -26,6 +26,12 @@ pub struct EcosystemApp {
     /// Políticas de supervisión (todas opcionales, con defaults).
     #[serde(default, skip_serializing_if = "is_default_policy")]
     pub policy: crate::runtime::policy::Policy,
+    /// Hook shell (`cmd.exe /C`) antes del git sync. None = skip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_deploy: Option<String>,
+    /// Hook shell después del git sync, antes del restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_deploy: Option<String>,
 }
 
 fn is_default_policy(p: &crate::runtime::policy::Policy) -> bool {
@@ -79,6 +85,8 @@ impl Ecosystem {
                 args: None,
                 env: cfg.env.clone(),
                 policy: Default::default(),
+                pre_deploy: None,
+                post_deploy: None,
             }],
         };
         Ok((eco, cfg))
@@ -129,6 +137,8 @@ mod tests {
                 args: None,
                 env: HashMap::from([("PORT".to_string(), "3000".to_string())]),
                 policy: Default::default(),
+                pre_deploy: None,
+                post_deploy: None,
             }],
         };
         let s = serde_json::to_string(&eco).unwrap();

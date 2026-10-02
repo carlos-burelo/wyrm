@@ -2,6 +2,7 @@
 //!
 //! Cada subcomando vive en su módulo; `run()` despacha.
 
+pub mod deploy;
 pub mod doctor;
 pub mod init;
 pub mod list;
@@ -77,6 +78,13 @@ pub enum Commands {
     },
     /// Ejecuta el demonio en foreground (para debug / sin servicio)
     Daemon,
+    /// Despliega una app: hooks + git sync + restart
+    Deploy {
+        name: String,
+        /// Rama/tag/SHA a desplegar (default: pull --ff-only)
+        #[arg(long)]
+        ref_: Option<String>,
+    },
     /// Diagnóstico del entorno (node, demonio, servicio, disco, logs)
     Doctor,
     /// TUI interactiva de primer nivel
@@ -111,6 +119,7 @@ pub async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             follow,
         }) => logs::cmd_logs(&name, lines, follow).await?,
         Some(Commands::Daemon) => crate::daemon::run_foreground().await?,
+        Some(Commands::Deploy { name, ref_ }) => deploy::cmd_deploy(&name, ref_).await?,
         Some(Commands::Doctor) => doctor::cmd_doctor().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {

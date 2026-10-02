@@ -150,6 +150,55 @@ impl Database {
         }
         Ok(())
     }
+
+    fn ensure_deploys(&self) -> Result<()> {
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS deploys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app TEXT NOT NULL,
+                sha_before TEXT NOT NULL,
+                sha_after TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_deploy(&self, app: &str, before: &str, after: &str, status: &str) -> Result<()> {
+        self.ensure_deploys()?;
+        self.conn.execute(
+            "INSERT INTO deploys (app, sha_before, sha_after, status) VALUES (?1, ?2, ?3, ?4)",
+            params![app, before, after, status],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_deploys(&self, app: &str, limit: i64) -> Result<Vec<DeployRecord>> {
+        self.ensure_deploys()?;
+        let mut stmt = self.conn.prepare(
+            "SELECT sha_before, sha_after, status, created_at FROM deploys
+             WHERE app = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![app, limit], |row| {
+            Ok(DeployRecord {
+                sha_before: row.get(0)?,
+                sha_after: row.get(1)?,
+                status: row.get(2)?,
+                created_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            })
+        })?;
+        rows.collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeployRecord {
+    pub sha_before: String,
+    pub sha_after: String,
+    pub status: String,
+    pub created_at: String,
 }
 
 #[cfg(test)]
