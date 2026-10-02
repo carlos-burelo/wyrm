@@ -26,6 +26,9 @@ pub(crate) struct ManagedApp {
     /// Salidas consecutivas antes de `min_uptime_secs` (crash-loop).
     /// Un arranque estable lo resetea; al llegar a `max_restarts` → ERRORED.
     pub(crate) unstable: u32,
+    /// Fallos HTTP consecutivos y último chequeo (healthcheck).
+    pub(crate) health_fail: u32,
+    pub(crate) last_health: Option<SystemTime>,
     pub(crate) last_heartbeat: SystemTime,
 }
 
@@ -39,6 +42,8 @@ impl ManagedApp {
             started_at: None,
             crash_count: 0,
             unstable: 0,
+            health_fail: 0,
+            last_health: None,
             last_heartbeat: SystemTime::now(),
         }
     }

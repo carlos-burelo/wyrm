@@ -109,6 +109,8 @@ fn my_service_main(_arguments: Vec<OsString>) {
             daemon.restore_from_db().await;
             let d2 = daemon.clone();
             tokio::spawn(async move { d2.supervise().await });
+            let d3 = daemon.clone();
+            tokio::spawn(async move { crate::daemon::health::health_loop(d3).await });
             let handler = crate::daemon::blocking_handler(daemon);
             let _ = crate::ipc::run_ipc_server_with(handler).await;
         });

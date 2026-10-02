@@ -1,5 +1,6 @@
 //! Daemon supervisor: estado en memoria + IPC + restore.
 
+pub mod health;
 pub mod state;
 pub mod supervise;
 
@@ -323,6 +324,8 @@ pub async fn run_foreground() -> Result<(), Box<dyn std::error::Error>> {
     daemon.restore_from_db().await;
     let d2 = daemon.clone();
     tokio::spawn(async move { d2.supervise().await });
+    let d3 = daemon.clone();
+    tokio::spawn(async move { health::health_loop(d3).await });
 
     let handler = blocking_handler(daemon);
 
