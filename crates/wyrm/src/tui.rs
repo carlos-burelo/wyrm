@@ -260,8 +260,8 @@ async fn event_loop(
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
                             load_logs(st);
-                            st.log_scroll = (st.log_scroll + 1)
-                                .min(st.log_lines.len().saturating_sub(1));
+                            st.log_scroll =
+                                (st.log_scroll + 1).min(st.log_lines.len().saturating_sub(1));
                         }
                         KeyCode::Char('r') => {
                             load_logs(st);
@@ -364,12 +364,14 @@ fn draw_header(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
 
 fn draw_list(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
     let rows_data = st.filtered();
-    let header = Row::new(vec!["NAME", "STATUS", "PID", "CPU%", "MEM", "RESTARTS", "UPTIME"])
-        .style(
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let header = Row::new(vec![
+        "NAME", "STATUS", "PID", "CPU%", "MEM", "RESTARTS", "UPTIME",
+    ])
+    .style(
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    );
     let rows: Vec<Row> = rows_data
         .iter()
         .enumerate()
@@ -453,7 +455,10 @@ fn draw_logs(f: &mut ratatui::Frame, area: Rect, st: &TuiState) {
         .collect();
     let list = List::new(visible).block(
         Block::default()
-            .title(format!(" logs:{} ({} líneas, j/k scroll, r recargar, esc volver) ", st.log_name, total))
+            .title(format!(
+                " logs:{} ({} líneas, j/k scroll, r recargar, esc volver) ",
+                st.log_name, total
+            ))
             .borders(Borders::ALL),
     );
     f.render_widget(list, area);

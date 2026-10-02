@@ -112,20 +112,36 @@ impl Daemon {
                 }
             }
             "STOP" => {
-                let name = req.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.stop(name).await
             }
             "RESTART" => {
-                let name = req.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.restart(name).await
             }
             "DELETE" => {
-                let name = req.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.delete(name).await
             }
             "LIST" => self.list().await,
             "STATUS" => {
-                let name = req.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.status(name).await
             }
             other => Response::err(format!("Acción desconocida: {other}")),
@@ -184,7 +200,10 @@ impl Daemon {
         app.crash_count = 0;
         drop(guard);
         persist_status(name, "STOPPED", false);
-        Response::ok("STOP", serde_json::json!({ "name": name, "status": "STOPPED" }))
+        Response::ok(
+            "STOP",
+            serde_json::json!({ "name": name, "status": "STOPPED" }),
+        )
     }
 
     async fn restart(self: &Arc<Self>, name: &str) -> Response {
@@ -412,9 +431,7 @@ pub fn now_unix() -> u64 {
 pub fn blocking_handler(daemon: Arc<Daemon>) -> crate::ipc::Handler {
     std::sync::Arc::new(move |req: Request| {
         let d = daemon.clone();
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(d.handle(req))
-        })
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(d.handle(req)))
     })
 }
 

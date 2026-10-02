@@ -51,7 +51,10 @@ pub struct AppConfig {
     pub env: HashMap<String, String>,
 }
 
-pub fn inspect_and_configure(project_dir: &Path, custom_name: Option<String>) -> Result<AppConfig, Box<dyn std::error::Error>> {
+pub fn inspect_and_configure(
+    project_dir: &Path,
+    custom_name: Option<String>,
+) -> Result<AppConfig, Box<dyn std::error::Error>> {
     let pkg_path = project_dir.join("package.json");
     if !pkg_path.exists() {
         return Err("No se encontró package.json en el directorio especificado.".into());
@@ -77,8 +80,14 @@ pub fn inspect_and_configure(project_dir: &Path, custom_name: Option<String>) ->
     let mut env_vars = HashMap::new();
     let env_prod = project_dir.join(".env.production");
     let env_default = project_dir.join(".env");
-    
-    let env_to_load = if env_prod.exists() { Some(env_prod) } else if env_default.exists() { Some(env_default) } else { None };
+
+    let env_to_load = if env_prod.exists() {
+        Some(env_prod)
+    } else if env_default.exists() {
+        Some(env_default)
+    } else {
+        None
+    };
     if let Some(path) = env_to_load {
         if let Ok(iter) = dotenvy::from_path_iter(path) {
             for item in iter.flatten() {
@@ -87,7 +96,10 @@ pub fn inspect_and_configure(project_dir: &Path, custom_name: Option<String>) ->
         }
     }
 
-    let next_standalone = project_dir.join(".next").join("standalone").join("server.js");
+    let next_standalone = project_dir
+        .join(".next")
+        .join("standalone")
+        .join("server.js");
     if next_standalone.exists() {
         return Ok(AppConfig {
             name: app_name,
@@ -127,6 +139,9 @@ pub fn inspect_and_configure(project_dir: &Path, custom_name: Option<String>) ->
             env: env_vars,
         })
     } else {
-        Err("No se pudo detectar el comando de inicio. Define un script 'start' en package.json.".into())
+        Err(
+            "No se pudo detectar el comando de inicio. Define un script 'start' en package.json."
+                .into(),
+        )
     }
 }

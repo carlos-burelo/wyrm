@@ -8,7 +8,10 @@ pub const PIPE_NAME: &str = r"\\.\pipe\wyrm_ipc";
 const MAX_FRAME: usize = 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn send_request(action: &str, payload: serde_json::Value) -> Result<Response, Box<dyn std::error::Error>> {
+pub async fn send_request(
+    action: &str,
+    payload: serde_json::Value,
+) -> Result<Response, Box<dyn std::error::Error>> {
     let mut client = ClientOptions::new().open(PIPE_NAME).map_err(|e| {
         format!("No se pudo conectar al demonio Wyrm ({PIPE_NAME}): {e}. ¿Está corriendo `wyrm daemon` o el servicio?")
     })?;
@@ -30,13 +33,16 @@ pub async fn send_request(action: &str, payload: serde_json::Value) -> Result<Re
     if buf.is_empty() {
         return Err("El demonio cerró la conexión sin responder".into());
     }
-    let resp: Response = serde_json::from_slice(&buf)
-        .map_err(|e| format!("Respuesta inválida del demonio: {e}"))?;
+    let resp: Response =
+        serde_json::from_slice(&buf).map_err(|e| format!("Respuesta inválida del demonio: {e}"))?;
     Ok(resp)
 }
 
 /// Compat: devuelve string legible para la CLI vieja.
-pub async fn send_command(action: &str, payload: serde_json::Value) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn send_command(
+    action: &str,
+    payload: serde_json::Value,
+) -> Result<String, Box<dyn std::error::Error>> {
     let r = send_request(action, payload).await?;
     if r.is_ok() {
         Ok(r.data.map(|d| d.to_string()).unwrap_or(r.message))

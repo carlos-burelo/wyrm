@@ -79,7 +79,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Delete { name, yes }) => cmd_delete(&name, yes).await?,
         Some(Commands::List { json }) => cmd_list(json).await?,
         Some(Commands::Status { name }) => cmd_status(&name).await?,
-        Some(Commands::Logs { name, lines, follow }) => cmd_logs(&name, lines, follow).await?,
+        Some(Commands::Logs {
+            name,
+            lines,
+            follow,
+        }) => cmd_logs(&name, lines, follow).await?,
         Some(Commands::Daemon) => crate::daemon::run_foreground().await?,
         Some(Commands::Top) => crate::tui::run().await?,
         Some(Commands::Service { action }) => match action.as_str() {
@@ -116,7 +120,10 @@ fn atty_like() -> bool {
     true
 }
 
-async fn cmd_start(name: Option<String>, cwd: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+async fn cmd_start(
+    name: Option<String>,
+    cwd: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let target_dir = cwd
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
@@ -180,31 +187,34 @@ async fn cmd_delete(name: &str, yes: bool) -> Result<(), Box<dyn std::error::Err
 }
 
 async fn cmd_list(json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let rows: Vec<crate::daemon::AppStatus> = match crate::ipc::send_request("LIST", serde_json::Value::Null).await {
-        Ok(res) if res.is_ok() => serde_json::from_value(res.data.unwrap_or_default()).unwrap_or_default(),
-        _ => {
-            // Fallback DB.
-            let db_rows = tokio::task::spawn_blocking(|| {
-                crate::db::Database::init()
-                    .and_then(|db| db.list_apps())
-                    .unwrap_or_default()
-            })
-            .await
-            .unwrap_or_default();
-            db_rows
-                .into_iter()
-                .map(|r| crate::daemon::AppStatus {
-                    name: r.name,
-                    status: format!("{} (daemon off)", r.status),
-                    pid: None,
-                    restarts: r.restarts as u32,
-                    uptime_secs: 0,
-                    executable: r.executable,
-                    cwd: r.cwd,
+    let rows: Vec<crate::daemon::AppStatus> =
+        match crate::ipc::send_request("LIST", serde_json::Value::Null).await {
+            Ok(res) if res.is_ok() => {
+                serde_json::from_value(res.data.unwrap_or_default()).unwrap_or_default()
+            }
+            _ => {
+                // Fallback DB.
+                let db_rows = tokio::task::spawn_blocking(|| {
+                    crate::db::Database::init()
+                        .and_then(|db| db.list_apps())
+                        .unwrap_or_default()
                 })
-                .collect()
-        }
-    };
+                .await
+                .unwrap_or_default();
+                db_rows
+                    .into_iter()
+                    .map(|r| crate::daemon::AppStatus {
+                        name: r.name,
+                        status: format!("{} (daemon off)", r.status),
+                        pid: None,
+                        restarts: r.restarts as u32,
+                        uptime_secs: 0,
+                        executable: r.executable,
+                        cwd: r.cwd,
+                    })
+                    .collect()
+            }
+        };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -259,7 +269,10 @@ fn format_uptime(secs: u64) -> String {
 async fn cmd_status(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     match crate::ipc::send_request("STATUS", serde_json::json!({ "name": name })).await {
         Ok(res) if res.is_ok() => {
-            println!("{}", serde_json::to_string_pretty(&res.data.unwrap_or_default())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&res.data.unwrap_or_default())?
+            );
         }
         Ok(res) => eprintln!("Error: {}", res.message),
         Err(e) => eprintln!("Daemon no disponible: {e}"),
@@ -267,7 +280,11 @@ async fn cmd_status(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn cmd_logs(name: &str, lines: usize, follow: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn cmd_logs(
+    name: &str,
+    lines: usize,
+    follow: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let path = crate::db::Database::log_path_for(name);
     if !path.exists() {
         eprintln!("Sin logs en {} (¿la app existe?)", path.display());
