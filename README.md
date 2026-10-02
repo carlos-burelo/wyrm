@@ -12,7 +12,7 @@
 ## Instalación
 
 ```powershell
-npm install -g wyrm
+npm install -g @carlos-burelo/wyrm
 ```
 
 O desde fuente:

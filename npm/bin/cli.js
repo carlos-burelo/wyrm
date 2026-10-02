@@ -8,7 +8,7 @@ const binPath = path.join(__dirname, '..', 'vendor', 'wyrm.exe');
 
 if (!fs.existsSync(binPath)) {
   console.error(
-    '[wyrm] Falta vendor/wyrm.exe. Reinstala (npm i -g wyrm) o compila local con `npm run build`.'
+    '[wyrm] Falta vendor/wyrm.exe. Reinstala (npm i -g @carlos-burelo/wyrm) o compila local con `npm run build`.'
   );
   process.exit(1);
 }
