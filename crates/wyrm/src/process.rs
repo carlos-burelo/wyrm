@@ -1,48 +1,143 @@
+use std::fs::OpenOptions;
 use std::os::windows::io::AsRawHandle;
-use std::process::{Child, Command, Stdio};
-use windows::Win32::Foundation::HANDLE;
+use std::path::Path;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JobObjectExtendedLimitInformation,
 };
 
-pub struct ProcessGuard {
-    job_handle: HANDLE,
+pub(crate) struct JobHandle(HANDLE);
+
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
 }
 
-impl ProcessGuard {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        unsafe {
-            let job = CreateJobObjectW(None, None)?;
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+// SAFETY: el HANDLE del Job solo se usa para AssignProcessToJobObject desde el
+// hilo que hace spawn. El daemon es single-owner por app.
+unsafe impl Send for JobHandle {}
+unsafe impl Sync for JobHandle {}
 
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const _,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )?;
+pub struct ManagedChild {
+    pub child: tokio::process::Child,
+    _job: JobHandle,
+}
 
-            Ok(Self { job_handle: job })
+impl ManagedChild {
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+}
+
+pub(crate) fn create_job() -> Result<JobHandle, Box<dyn std::error::Error + Send + Sync>> {
+    unsafe {
+        let job = CreateJobObjectW(None, None)?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )?;
+        Ok(JobHandle(job))
+    }
+}
+
+pub fn spawn_managed(
+    config: &crate::inspector::AppConfig,
+    log_path: &Path,
+) -> Result<ManagedChild, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    let err_file = log_file.try_clone()?;
+
+    let mut cmd = tokio::process::Command::new(&config.executable);
+    cmd.args(&config.args)
+        .current_dir(&config.cwd)
+        .envs(&config.env)
+        .stdout(log_file)
+        .stderr(err_file)
+        .kill_on_drop(true);
+
+    // Evita ventana de consola en Windows Server.
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = cmd.spawn()?;
+    let job = create_job()?;
+    unsafe {
+        // tokio 1.x: raw_handle() -> Option<RawHandle>
+        if let Some(raw) = child.raw_handle() {
+            let process_handle = HANDLE(raw as *mut std::ffi::c_void);
+            AssignProcessToJobObject(job.0, process_handle)?;
         }
     }
 
-    pub fn spawn_managed(&self, config: &crate::inspector::AppConfig) -> Result<Child, Box<dyn std::error::Error>> {
-        let mut cmd = Command::new(&config.executable);
-        cmd.args(&config.args)
-           .current_dir(&config.cwd)
-           .envs(&config.env)
-           .stdout(Stdio::piped())
-           .stderr(Stdio::piped());
+    Ok(ManagedChild { child, _job: job })
+}
 
-        let child = cmd.spawn()?;
-        unsafe {
-            let process_handle = HANDLE(child.as_raw_handle());
-            AssignProcessToJobObject(self.job_handle, process_handle)?;
+/// Compat con la API vieja (tests / otros módulos).
+pub struct ProcessGuard {
+    job: Option<JobHandle>,
+}
+
+impl ProcessGuard {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self {
+            job: Some(create_job()?),
+        })
+    }
+
+    pub fn spawn_managed(
+        &self,
+        config: &crate::inspector::AppConfig,
+    ) -> Result<std::process::Child, Box<dyn std::error::Error + Send + Sync>> {
+        let log_path = crate::db::Database::log_path_for(&config.name);
+        if let Some(parent) = log_path.parent() {
+            std::fs::create_dir_all(parent).ok();
         }
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        let err_file = log_file.try_clone()?;
 
+        let mut cmd = std::process::Command::new(&config.executable);
+        cmd.args(&config.args)
+            .current_dir(&config.cwd)
+            .envs(&config.env)
+            .stdout(log_file)
+            .stderr(err_file);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let child = cmd.spawn()?;
+        if let Some(job) = &self.job {
+            unsafe {
+                let process_handle = HANDLE(child.as_raw_handle());
+                AssignProcessToJobObject(job.0, process_handle)?;
+            }
+        }
         Ok(child)
+    }
+
+    pub fn log_path_for(name: &str) -> std::path::PathBuf {
+        crate::db::Database::log_path_for(name)
     }
 }
