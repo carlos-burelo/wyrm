@@ -57,20 +57,29 @@ wyrm service install
 wyrm service uninstall
 ```
 
-## TUI (`wyrm top`)
+## TUI (`wyrm top`) — mejor que `pm2 monit`
+
+Dashboard dos paneles: lista + detalle + sparklines CPU/MEM + preview logs.
+Tabs `1/2/3` o `tab` para Dashboard / Logs / Help.
 
 | Tecla | Acción |
 |---|---|
-| `j/k` o `↑/↓` | navegar |
-| `enter` / `l` | ver logs |
-| `r` | restart app |
-| `s` | stop app |
+| `1/2/3`, `tab` | cambiar tab |
+| `j/k` o `↑/↓` | navegar apps o scroll logs |
+| `enter` / `l` | ver logs full de la app |
+| `r` | restart |
+| `s` / `S` | stop / start (revive STOPPED desde DB, sin cwd) |
+| `o` | ciclo orden: nombre → cpu → mem → uptime → restarts |
 | `d` luego `y` | delete con confirmación |
-| `/` | filtrar (esc sale) |
+| `/` | filtrar apps o buscar en logs |
+| `f` / `G` | follow on/off / ir al final en logs |
+| `F` luego `y` | vaciar log actual |
 | `?` | ayuda |
 | `q` / `esc` | salir o volver |
 
-Header muestra estado del demonio, CPU global y MEM usada/total. La tabla muestra CPU% y MEM por proceso.
+Logs con colores por nivel (error rojo, warn amarillo, ok/ready verde) y
+resaltado de búsqueda. Header con demonio, CPU global, MEM y conteo running.
+Detalle con pid, executable, cwd, log path y gauge de MEM del sistema.
 
 ## Arquitectura
 
