@@ -96,6 +96,48 @@ Diagnóstico:
 wyrm doctor   # node, demonio, servicio, DB, disco, logs + hints
 ```
 
+## Deploy (git + hooks)
+
+```powershell
+wyrm deploy <app> [--ref main]  # pre hook → git sync → post hook → restart
+wyrm releases <app> [--limit 10]
+wyrm rollback <app>             # git reset al último deploy ok + restart
+```
+
+Hooks en `wyrm.json` por app: `pre_deploy` / `post_deploy` (shell `cmd /C`).
+Historial en SQLite (`deploys`).
+
+## API local + métricas (plano de control)
+
+El demonio sirve `http://127.0.0.1:8379` (`WYRM_API_ADDR`, off con
+`WYRM_NO_API=1`). Auth Bearer con token en `%ProgramData%\wyrm\token`:
+
+```powershell
+wyrm token            # muestra el token
+wyrm token --rotate
+curl -H "Authorization: Bearer $t" http://127.0.0.1:8379/apps
+curl -H "Authorization: Bearer $t" http://127.0.0.1:8379/metrics  # Prometheus
+```
+
+Endpoints: `GET /health` (público), `GET /apps`, `GET /apps/:name`,
+`POST /apps/:name/{start,stop,restart}`, `GET /metrics`
+(`wyrm_app_up/uptime/restarts/cpu/memory`).
+
+## Edge + TLS (mini-PAAS)
+
+```powershell
+wyrm route add <host> <http://127.0.0.1:3000>
+wyrm route list / wyrm route rm <host>
+wyrm edge                       # :80 (WYRM_EDGE_PORT) + :443 SNI (WYRM_EDGE_TLS_PORT, 0=off)
+wyrm cert issue <host> [--staging|--prod] [--email x@y]  # requiere edge en :80
+wyrm cert selfsigned <host>     # solo dev
+wyrm cert list / wyrm cert renew [--force]
+```
+
+`wyrm.json` acepta `routes: [{host, target}]` (se aplican con `start --all`).
+TLS con SNI + wildcard, recarga de certs cada 60s. Proxy HTTP bufferizado
+(16 MB, sin websockets todavía).
+
 Servicio Windows (producción):
 
 ```powershell
@@ -139,13 +181,16 @@ CLI (clap) ──Named Pipe NDJSON──> Daemon
 
 crates/wyrm/src:
   main.rs      bootstrap (16 líneas)
-  cli/         args + start/manage/list/status/logs/init
-  ecosystem/   wyrm.json multi-app
-  daemon/      state + supervisor + supervise loop
+  api/         HTTP 127.0.0.1:8379 + token + /metrics Prometheus
+  cli/         args + start/manage/list/status/logs/init/deploy/token/route/cert/doctor
+  ecosystem/   wyrm.json multi-app (+routes, hooks, policy)
+  deploy/      hooks cmd.exe + git sync/reset
+  daemon/      state + supervisor + health loop
+  edge/        proxy host→target + acme HTTP-01 + tls SNI
   ipc/         pipe + protocol Request/Response
-  store/       SQLite (db) + paths
-  runtime/     inspector/process/service Windows
-  logs/        read/tail/flush compartido cli+tui
+  store/       SQLite (apps, deploys, routes) + paths
+  runtime/     inspector/policy/process/service Windows
+  logs/        read/tail/flush/rotate compartido cli+tui
   tui/         state/data/actions/events/theme/views
 ```
 
