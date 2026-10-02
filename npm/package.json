@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "El gestor de procesos definitivo para Windows Server escrito en Rust",
   "main": "bin/cli.js",
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md"
+  ],
   "bin": {
     "wyrm": "bin/cli.js"
   },
@@ -13,8 +18,7 @@
     "win32"
   ],
   "cpu": [
-    "x64",
-    "arm64"
+    "x64"
   ],
   "repository": {
     "type": "git",
