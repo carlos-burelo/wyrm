@@ -6,6 +6,7 @@
 //! sirven desde `%ProgramData%/wyrm/certs/.http-01/` para `wyrm cert`.
 
 pub mod acme;
+pub mod tls;
 
 use axum::{
     body::Body,
@@ -135,11 +136,16 @@ async fn proxy(State(st): State<EdgeState>, req: axum::http::Request<Body>) -> R
 }
 
 /// Proxy en foreground. Puerto `WYRM_EDGE_PORT` (default 80, requiere admin).
+/// Si hay certificados, también HTTPS en `WYRM_EDGE_TLS_PORT` (default 443).
 pub async fn run_edge() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = std::env::var("WYRM_EDGE_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(80);
+    let tls_port: u16 = std::env::var("WYRM_EDGE_TLS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(443);
     std::fs::create_dir_all(challenges_dir()).ok();
     let state = EdgeState {
         client: reqwest::Client::builder()
@@ -147,6 +153,14 @@ pub async fn run_edge() -> Result<(), Box<dyn std::error::Error>> {
             .build()?,
     };
     let app = axum::Router::new().fallback(proxy).with_state(state);
+    if tls_port != 0 {
+        let tls_app = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tls::serve_tls(tls_app, tls_port).await {
+                eprintln!("[edge] TLS desactivado: {e}");
+            }
+        });
+    }
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

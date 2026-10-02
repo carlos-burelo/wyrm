@@ -2,6 +2,16 @@
 
 pub async fn cmd_cert(action: &str, rest: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match action {
+        "selfsigned" => {
+            let Some(host) = rest.first() else {
+                eprintln!("Uso: wyrm cert selfsigned <host>  (solo dev, sin validación)");
+                return Ok(());
+            };
+            match crate::edge::acme::self_signed(host) {
+                Ok(()) => println!("OK: self-signed para {host}"),
+                Err(e) => eprintln!("FAIL: {e}"),
+            }
+        }
         "issue" => {
             let Some(host) = rest.first() else {
                 eprintln!("Uso: wyrm cert issue <host> [--staging|--prod] [--email x@y]");
@@ -23,10 +33,14 @@ pub async fn cmd_cert(action: &str, rest: &[String]) -> Result<(), Box<dyn std::
         }
         "renew" => {
             let force = rest.iter().any(|a| a == "--force");
-            let staging = !rest.iter().any(|a| a == "--prod");
+            let want = if rest.iter().any(|a| a == "--prod") {
+                "prod"
+            } else {
+                "staging"
+            };
             let mut n = 0;
             for info in crate::edge::acme::list() {
-                if info.staging != staging {
+                if info.kind != want {
                     continue;
                 }
                 if !force && info.days_left > 30 {
@@ -34,7 +48,7 @@ pub async fn cmd_cert(action: &str, rest: &[String]) -> Result<(), Box<dyn std::
                     continue;
                 }
                 println!("Renovando {}…", info.host);
-                match crate::edge::acme::issue(&info.host, staging, None).await {
+                match crate::edge::acme::issue(&info.host, want == "staging", None).await {
                     Ok(()) => {
                         n += 1;
                         println!("OK {}", info.host);
@@ -50,14 +64,11 @@ pub async fn cmd_cert(action: &str, rest: &[String]) -> Result<(), Box<dyn std::
                 println!("Sin certificados. `wyrm cert issue <host> [--staging|--prod]`.");
                 return Ok(());
             }
-            println!("{:<30} {:<8} {:<12} {}", "HOST", "CA", "EMITIDO", "DIAS");
+            println!("{:<30} {:<8} {:<12} {}", "HOST", "KIND", "EMITIDO", "DIAS");
             for r in rows {
                 println!(
                     "{:<30} {:<8} {:<12} {}",
-                    r.host,
-                    if r.staging { "staging" } else { "prod" },
-                    r.issued_at_unix,
-                    r.days_left
+                    r.host, r.kind, r.issued_at_unix, r.days_left
                 );
             }
         }

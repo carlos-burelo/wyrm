@@ -128,7 +128,7 @@ pub async fn issue(host: &str, staging: bool, email: Option<&str>) -> Result<(),
     std::fs::write(dir.join("fullchain.pem"), &chain_pem).map_err(|e| e.to_string())?;
     let meta = serde_json::json!({
         "host": host,
-        "staging": staging,
+        "kind": if staging { "staging" } else { "prod" },
         "issued_at_unix": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -151,12 +151,67 @@ pub async fn issue(host: &str, staging: bool, email: Option<&str>) -> Result<(),
     Ok(())
 }
 
+/// Cert autofirmado para dev/CI (misma carpeta que ACME, `kind: local`).
+/// No valida nada: solo sirve para probar el TLS del edge sin DNS público.
+pub fn self_signed(host: &str) -> Result<(), String> {
+    let host = host.to_lowercase();
+    if !valid_host(&host) || host.starts_with("*.") {
+        return Err(format!("host inválido para self-signed: {host}"));
+    }
+    let key = rcgen::generate_simple_self_signed(vec![host.clone()]).map_err(|e| e.to_string())?;
+    let dir = host_dir(&host);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("privkey.pem"), key.signing_key.serialize_pem())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("fullchain.pem"), key.cert.pem()).map_err(|e| e.to_string())?;
+    let meta = serde_json::json!({
+        "host": host,
+        "kind": "local",
+        "issued_at_unix": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "valid_days": 90,
+    });
+    let _ = std::fs::write(
+        dir.join("meta.json"),
+        serde_json::to_string_pretty(&meta).unwrap_or_default(),
+    );
+    println!("Self-signed para {host} en {}", dir.display());
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct CertInfo {
     pub host: String,
-    pub staging: bool,
+    pub kind: String,
     pub issued_at_unix: u64,
     pub days_left: i64,
+}
+
+fn read_meta(dir: &std::path::Path) -> (String, u64) {
+    std::fs::read_to_string(dir.join("meta.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .map(|v| {
+            let kind = v
+                .get("kind")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    if v.get("staging").and_then(|x| x.as_bool()).unwrap_or(false) {
+                        "staging".into()
+                    } else {
+                        "prod".into()
+                    }
+                });
+            let issued = v
+                .get("issued_at_unix")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0);
+            (kind, issued)
+        })
+        .unwrap_or(("prod".into(), 0))
 }
 
 pub fn list() -> Vec<CertInfo> {
@@ -169,25 +224,14 @@ pub fn list() -> Vec<CertInfo> {
         if host.starts_with('.') || !entry.path().join("fullchain.pem").exists() {
             continue;
         }
-        let (staging, issued) = std::fs::read_to_string(entry.path().join("meta.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .map(|v| {
-                (
-                    v.get("staging").and_then(|x| x.as_bool()).unwrap_or(false),
-                    v.get("issued_at_unix")
-                        .and_then(|x| x.as_u64())
-                        .unwrap_or(0),
-                )
-            })
-            .unwrap_or((false, 0));
+        let (kind, issued) = read_meta(&entry.path());
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         out.push(CertInfo {
             host,
-            staging,
+            kind,
             issued_at_unix: issued,
             days_left: 90 - now.saturating_sub(issued) as i64 / 86400,
         });
