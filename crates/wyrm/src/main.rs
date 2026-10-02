@@ -14,7 +14,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(long, hidden = true)]
+    #[arg(long, hide = true)]
     daemon: bool,
 }
 

@@ -5,8 +5,8 @@ use windows_service::{
     define_windows_service,
     service::{
         ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceControlAccept,
-        ServiceErrorControl, ServiceExitCode, ServiceInfo, ServiceStartType, ServiceState,
-        ServiceStatus, ServiceType,
+        ServiceErrorControl, ServiceExitCode, ServiceFailureActions, ServiceFailureResetPeriod,
+        ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
     },
     service_control_handler::{self, ServiceControlHandlerResult},
     service_dispatcher,
@@ -21,24 +21,24 @@ define_windows_service!(ffi_service_main, my_service_main);
 pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
     let current_exe = env::current_exe()?;
     let manager = ServiceManager::local_computer(
-        None,
+        None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
     )?;
 
     let service_info = ServiceInfo {
-        name: SERVICE_NAME,
-        display_name: DISPLAY_NAME,
+        name: OsString::from(SERVICE_NAME),
+        display_name: OsString::from(DISPLAY_NAME),
         service_type: ServiceType::OWN_PROCESS,
-        start_type: ServiceStartType::Auto,
+        start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        executable_path: current_exe.as_path(),
-        launch_arguments: vec!["--daemon"],
+        executable_path: current_exe,
+        launch_arguments: vec![OsString::from("--daemon")],
         dependencies: vec![],
         account_name: None,
-        password: None,
+        account_password: None,
     };
 
-    let service = manager.create_service(&service_info, ServiceAccess::SET_FAILURE_ACTIONS)?;
+    let service = manager.create_service(&service_info, ServiceAccess::CHANGE_CONFIG)?;
 
     let actions = vec![
         ServiceAction {
@@ -51,7 +51,12 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    service.set_failure_actions(actions, Duration::from_secs(86400), None, None)?;
+    service.update_failure_actions(ServiceFailureActions {
+        reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86400)),
+        reboot_msg: None,
+        command: None,
+        actions: Some(actions),
+    })?;
 
     println!("Servicio {} instalado y configurado para arranque automático.", SERVICE_NAME);
     Ok(())
@@ -74,7 +79,7 @@ fn my_service_main(_arguments: Vec<OsString>) {
             service_type: ServiceType::OWN_PROCESS,
             current_state: ServiceState::Running,
             controls_accepted: ServiceControlAccept::STOP,
-            exit_code: ServiceExitCode::NoError,
+            exit_code: ServiceExitCode::NO_ERROR,
             checkpoint: 0,
             wait_hint: Duration::default(),
             process_id: None,
@@ -89,7 +94,7 @@ fn my_service_main(_arguments: Vec<OsString>) {
             service_type: ServiceType::OWN_PROCESS,
             current_state: ServiceState::Stopped,
             controls_accepted: ServiceControlAccept::empty(),
-            exit_code: ServiceExitCode::NoError,
+            exit_code: ServiceExitCode::NO_ERROR,
             checkpoint: 0,
             wait_hint: Duration::default(),
             process_id: None,

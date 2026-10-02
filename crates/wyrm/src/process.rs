@@ -39,7 +39,7 @@ impl ProcessGuard {
 
         let child = cmd.spawn()?;
         unsafe {
-            let process_handle = HANDLE(child.as_raw_handle() as isize);
+            let process_handle = HANDLE(child.as_raw_handle());
             AssignProcessToJobObject(self.job_handle, process_handle)?;
         }
 
