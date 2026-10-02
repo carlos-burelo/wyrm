@@ -12,6 +12,8 @@ impl Daemon {
     pub async fn supervise(self: Arc<Self>) {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
+            let mut sys = sysinfo::System::new();
+            sys.refresh_processes();
             let mut to_restart: Vec<AppConfig> = Vec::new();
             let mut errored: Vec<String> = Vec::new();
             {
@@ -68,6 +70,30 @@ impl Daemon {
                             }
                             Ok(None) => {
                                 app.last_heartbeat = SystemTime::now();
+                                // Tope de memoria: reinicia si la RSS supera el límite.
+                                if let Some(limit) = app.config.policy.max_memory_mb {
+                                    let pid = app.child.as_ref().and_then(|c| c.pid());
+                                    let used_mb = pid
+                                        .and_then(|p| sys.process(sysinfo::Pid::from_u32(p)))
+                                        .map(|proc| proc.memory() / 1_048_576)
+                                        .unwrap_or(0);
+                                    if used_mb > limit as u64 {
+                                        eprintln!(
+                                            "[wyrm] {} supera memoria ({}>{}MB), reiniciando…",
+                                            app.config.name, used_mb, limit
+                                        );
+                                        if let Some(mut child) = app.child.take() {
+                                            let _ = child.child.start_kill();
+                                            let _ = tokio::time::timeout(
+                                                Duration::from_secs(5),
+                                                child.child.wait(),
+                                            )
+                                            .await;
+                                        }
+                                        app.status = "CRASHED".to_string();
+                                        to_restart.push(app.config.clone());
+                                    }
+                                }
                             }
                             Err(e) => {
                                 eprintln!("[wyrm] try_wait {}: {e}", app.config.name);
