@@ -44,11 +44,22 @@ pub type Handler = Arc<dyn Fn(Request) -> Response + Send + Sync + 'static>;
 
 pub async fn run_ipc_server_with(handler: Handler) -> Result<(), Box<dyn std::error::Error>> {
     loop {
-        let server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(PIPE_NAME)?;
+        // Sin first_pipe_instance: varias instancias conviven mientras cada
+        // handler atiende a su cliente. Errores transitorios (p. ej. otro
+        // demonio con el pipe) reintentan en vez de matar al demonio.
+        let server = match ServerOptions::new().create(PIPE_NAME) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[wyrm] pipe ocupado, reintentando: {e}");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
 
-        server.connect().await?;
+        if let Err(e) = server.connect().await {
+            eprintln!("[wyrm] pipe connect: {e}");
+            continue;
+        }
         let h = handler.clone();
 
         tokio::spawn(async move {
