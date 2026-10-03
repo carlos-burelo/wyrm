@@ -222,16 +222,17 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Publicación manual a npm (verificada por `tests/e2e/prod-install.test.mjs`):
+Publicación en un comando (tu único trabajo: el OAuth de npm en el navegador):
 
 ```powershell
-cargo test -p wyrm
-pnpm test:e2e  # deploy-check + ciclo CLI + install prod simulado
-pnpm run build  # rust release + copia a npm/vendor/wyrm.exe
-node npm/bin/cli.js --version  # smoke
-pnpm --dir npm pack --dry-run  # debe listar bin/cli.js + vendor/wyrm.exe
-cd npm; pnpm publish --access public  # con tu sesión (pnpm login)
+pnpm release 1.0.2   # o sin args para la versión actual
 ```
+
+El script verifica rama limpia, sincroniza `Cargo.toml`/`npm/package.json`,
+corre unit + e2e, compila, mete el exe en `npm/vendor/`, hace smoke del
+wrapper y del tarball, pushea `main` + tag `vX.Y.Z` (CI construye el GitHub
+Release) y publica con `pnpm publish`. Falla rápido ante cualquier error.
+Simula sin efectos con `pnpm release 1.0.2 --dry-run`.
 
 El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
 
