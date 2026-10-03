@@ -28,15 +28,18 @@ function run(cmd, args, opts = {}) {
 }
 
 // En win32 los .cmd/.exe se invocan con string única (evita DEP0190).
+// Con stdio:'inherit' el hijo usa tu terminal (necesario para el OAuth de npm).
 function sh(cmdline, opts = {}) {
+  const inherit = opts.stdio === 'inherit';
   const r = spawnSync(cmdline, {
     cwd: opts.cwd ?? ROOT,
     env: { ...process.env, ...(opts.env ?? {}) },
     encoding: 'utf8',
     timeout: opts.timeout ?? 600000,
     shell: true,
+    ...(inherit ? { stdio: 'inherit' } : {}),
   });
-  return { status: r.status ?? 1, out: (r.stdout ?? '') + (r.stderr ?? '') };
+  return { status: r.status ?? 1, out: inherit ? '' : (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
 function step(name) {
@@ -269,8 +272,8 @@ if (DRY) {
 } else {
   console.log('si pide login, completa el OAuth en el navegador y el publish continúa');
   must(
-    sh('pnpm --dir npm publish --no-git-checks --access public'),
-    'publish falló (¿OAuth incompleto? reintenta el mismo comando)',
+    sh('pnpm --dir npm publish --no-git-checks --access public', { stdio: 'inherit' }),
+    'publish falló (reintenta el mismo comando)',
   );
   console.log(`\nOK ${SCOPE}@${VER} publicado`);
 }
