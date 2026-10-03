@@ -11,6 +11,7 @@
     "test:e2e:deploy": "node --test tests/e2e/deploy-check.test.mjs",
     "test:e2e:prod": "node --test tests/e2e/prod-install.test.mjs",
     "test:all": "cargo test -p wyrm && node --test \"tests/e2e/*.test.mjs\"",
-    "test:cli": "node npm/bin/cli.js"
+    "test:cli": "node npm/bin/cli.js",
+    "release": "node scripts/release.mjs"
   }
 }
