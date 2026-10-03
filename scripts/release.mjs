@@ -1,5 +1,7 @@
 // Release de wyrm en un comando: `pnpm release [X.Y.Z] [--dry-run]`
-// Sin args usa la versión actual de npm/package.json (debe coincidir con Cargo).
+// Sin versión: auto-bump (patch sobre lo último publicado en el registry).
+// Verifica sesión npm + maintainer ANTES de testear/compilar: si el publish
+// va a fallar con 404 (identidad sin permiso), lo sabes en segundos.
 // El único paso manual es el OAuth de npm en `pnpm publish` (abre el navegador).
 // Sin dependencias: solo builtins de node. Falla rápido ante cualquier error.
 import { spawnSync } from 'node:child_process';
@@ -54,6 +56,77 @@ function readJson(p) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
+function parseVer(v) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec((v ?? '').trim());
+  return m ? [+m[1], +m[2], +m[3]] : null;
+}
+
+function cmpVer(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+function fmtVer([a, b, c]) {
+  return `${a}.${b}.${c}`;
+}
+
+// Último publicado en el registry (null si no hay red o no existe).
+function latestPublished() {
+  const r = sh(`pnpm view "${SCOPE}" dist-tags.latest`);
+  if (r.status !== 0) return null;
+  const tok = r.out.trim().split(/\s+/).pop();
+  return parseVer(tok) ? tok : null;
+}
+
+function tokenFromNpmrc() {
+  const files = [
+    path.join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.npmrc'),
+    path.join(ROOT, '.npmrc'),
+    path.join(NPM_DIR, '.npmrc'),
+  ];
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    const m = fs.readFileSync(f, 'utf8').match(/_authToken\s*=\s*(.+)/);
+    if (!m) continue;
+    let t = m[1].trim().replace(/^["']|["']$/g, '');
+    const envRef = t.match(/^\$\{(.+)\}$/);
+    if (envRef) t = process.env[envRef[1]] ?? '';
+    if (t) return t;
+  }
+  return '';
+}
+
+// Quién eres en npm + si puedes publicar el paquete. Falla rápido antes
+// de compilar/testear en vano (un 404 al publicar casi siempre es identidad
+// sin permiso como maintainer, no problema de versión).
+async function authPreflight() {
+  const token = process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN || tokenFromNpmrc();
+  if (!token) {
+    fail('sin sesión npm (no hay authToken). Corre `pnpm login`, completa el OAuth y reintenta');
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  let me;
+  try {
+    const r = await fetch('https://registry.npmjs.org/-/whoami', { headers });
+    if (r.status === 401) fail('token npm inválido o expirado. Corre `pnpm login` de nuevo');
+    if (!r.ok) fail(`registry whoami -> HTTP ${r.status}`);
+    me = (await r.json()).username;
+  } catch (e) {
+    fail(`sin red hacia registry.npmjs.org o registry caído: ${e.message}`);
+  }
+  console.log(`sesión npm: @${me}`);
+  let maintainers = [];
+  try {
+    const pkg = await fetch(`https://registry.npmjs.org/${SCOPE.replace('/', '%2f')}`);
+    if (pkg.ok) maintainers = ((await pkg.json()).maintainers ?? []).map((m) => m.name);
+  } catch {
+    console.log('aviso: no se pudo leer maintainers (sigo de todos modos)');
+  }
+  if (maintainers.length > 0 && !maintainers.includes(me)) {
+    fail(`@${me} no es maintainer de ${SCOPE} (maintainers: ${maintainers.join(', ')}). El registry responde 404 en ese caso. Logueate con la cuenta dueña: \`pnpm login\``);
+  }
+}
+
 function cargoVersion() {
   const m = fs
     .readFileSync(path.join(ROOT, 'crates', 'wyrm', 'Cargo.toml'), 'utf8')
@@ -69,11 +142,25 @@ function setCargoVersion(v) {
 }
 
 // --- 1. Versión objetivo ----------------------------------------------------
+// Sin arg: auto-bump (patch sobre lo último publicado; respeta bump local
+// si ya es mayor). Con arg: esa versión exacta.
 const npmPkgPath = path.join(NPM_DIR, 'package.json');
 const current = readJson(npmPkgPath).version;
-const VER = argVer ?? current;
-if (!/^\d+\.\d+\.\d+$/.test(VER)) fail(`versión inválida: ${VER} (usa X.Y.Z)`);
-console.log(`release ${SCOPE}@${VER}${DRY ? ' (dry-run)' : ''}`);
+if (!parseVer(current)) fail(`versión local inválida: ${current}`);
+const PUB = latestPublished();
+let VER;
+if (argVer) {
+  if (!parseVer(argVer)) fail(`versión inválida: ${argVer} (usa X.Y.Z)`);
+  VER = argVer;
+} else if (!PUB) {
+  VER = current;
+} else if (cmpVer(parseVer(current), parseVer(PUB)) > 0) {
+  VER = current;
+} else {
+  const [a, b, c] = parseVer(PUB);
+  VER = fmtVer([a, b, c + 1]);
+}
+console.log(`registry latest: ${PUB ?? '?'} | local: ${current} | target: ${VER}${DRY ? ' (dry-run)' : ''}`);
 
 // --- 2. Precondiciones -------------------------------------------------------
 step('precondiciones');
@@ -87,6 +174,10 @@ for (const t of ['cargo', 'pnpm', 'node', 'git']) {
 if (run('git', ['status', '--porcelain']).out.trim() !== '') {
   fail('árbol sucio: commitea o stashea antes del release');
 }
+
+// --- 2b. Sesión npm primero: si el publish va a fallar, que sea ahora -------
+step('sesión npm');
+await authPreflight();
 
 // --- 3. Sync de versiones + check ya publicado --------------------------------
 step('versiones');
@@ -146,7 +237,10 @@ if (DRY) {
   must(run('git', ['push', 'origin', 'main']), 'push main falló');
   run('git', ['tag', '-d', `v${VER}`]); // re-release del mismo número si hizo falta
   must(run('git', ['tag', `v${VER}`]), 'tag falló');
-  must(run('git', ['push', 'origin', `v${VER}`]), 'push tag falló (si el tag remoto avanzó, borra/rereserva)');
+  if (run('git', ['push', 'origin', `v${VER}`]).status !== 0) {
+    console.log('tag remoto avanzó: force-push (el script es dueño del tag de release)');
+    must(run('git', ['push', '--force', 'origin', `v${VER}`]), 'push tag falló');
+  }
   console.log(`tag v${VER} pusheado: CI construye el GitHub Release`);
 }
 

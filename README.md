@@ -225,14 +225,17 @@ git push origin v0.1.0
 Publicación en un comando (tu único trabajo: el OAuth de npm en el navegador):
 
 ```powershell
-pnpm release 1.0.2   # o sin args para la versión actual
+pnpm release        # auto-bump: patch sobre lo último publicado
+pnpm release 1.0.2 # versión exacta
 ```
 
-El script verifica rama limpia, sincroniza `Cargo.toml`/`npm/package.json`,
-corre unit + e2e, compila, mete el exe en `npm/vendor/`, hace smoke del
-wrapper y del tarball, pushea `main` + tag `vX.Y.Z` (CI construye el GitHub
-Release) y publica con `pnpm publish`. Falla rápido ante cualquier error.
-Simula sin efectos con `pnpm release 1.0.2 --dry-run`.
+El script verifica sesión npm + maintainer primero (un 404 al publicar
+casi siempre es identidad sin permiso, no versión), sincroniza
+`Cargo.toml`/`npm/package.json`, corre unit + e2e, compila, mete el exe en
+`npm/vendor/`, hace smoke del wrapper y del tarball, pushea `main` + tag
+`vX.Y.Z` (CI construye el GitHub Release) y publica con `pnpm publish`.
+Falla rápido ante cualquier error.
+Simula sin efectos con `pnpm release --dry-run`.
 
 El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
 
