@@ -1,15 +1,14 @@
-// Puerta de despliegue: valida que el pipeline tag→release→npm no repita
-// el fallo de v1.0.1 (check idempotente contra `wyrm` sin scope, que hizo
-// skip del publish de `@carlos-burelo/wyrm@1.0.1` aunque no existía).
-// Además valida sync de versiones, tarball y smoke del binario/wrapper.
+// Puerta de despliegue: el fallo de v1.0.1 fue un check idempotente contra
+// `wyrm` sin scope (paquete ajeno) que hizo skip del publish real.
+// Decisión: CI nunca publica a npm (sin token); el publish es manual.
+// Este archivo valida que CI siga sin publicar, versiones sync, tarball
+// y smoke del binario/wrapper.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
   NPM_DIR,
-  ROOT,
-  SCOPE,
   WORKFLOW,
   cargoVersion,
   findWyrmBin,
@@ -25,29 +24,21 @@ test('workflow existe', () => {
   assert.ok(fs.existsSync(WORKFLOW), 'falta .github/workflows/release.yml');
 });
 
-test('check idempotente apunta al paquete con scope', () => {
+test('CI no publica a npm: sin publish, sin tokens, sin registry', () => {
   const y = yml();
-  assert.ok(
-    y.includes(`${SCOPE}@$TAG_VERSION`) || y.includes(`${SCOPE}@${'$'}{TAG_VERSION}`),
-    'publish idempotente debe consultar @carlos-burelo/wyrm@$TAG_VERSION',
-  );
-  const bare = y.match(/npm view\s+["']?wyrm@/g) ?? [];
-  const pnpmBare = y.match(/pnpm view\s+["']?wyrm@/g) ?? [];
-  assert.equal(bare.length, 0, `referencia al paquete sin scope (ajeno): ${bare}`);
-  assert.equal(pnpmBare.length, 0, `referencia al paquete sin scope (ajeno): ${pnpmBare}`);
+  assert.ok(!y.includes('npm publish'), 'CI no debe publicar');
+  assert.ok(!y.includes('pnpm publish'), 'CI no debe publicar');
+  assert.ok(!y.includes('secrets.NPM_TOKEN'), 'CI no debe usar tokens npm');
+  assert.ok(!y.includes('NODE_AUTH_TOKEN'), 'CI no debe autenticarse al registry');
+  assert.ok(!y.includes('registry-url'), 'CI no debe configurarse contra un registry');
 });
 
-test('workflow valida formato de tag y hace staging del binario', () => {
+test('CI valida, compila, testea e2e y sube el binario al Release', () => {
   const y = yml();
-  assert.ok(y.includes('^v[0-9]'), 'falta validación de tag vX.Y.Z');
-  assert.ok(y.includes('vendor-staging'), 'falta staging vendor desde artifact');
-  assert.ok(y.includes('vendor/wyrm.exe'), 'falta copia a npm/vendor/wyrm.exe');
-  assert.ok(y.includes('test -s'), 'falta verificación binario no vacío');
-});
-
-test('workflow tiene gate de tarball antes de publicar', () => {
-  const y = yml();
-  assert.ok(y.includes('pack --dry-run'), 'falta gate `pack --dry-run` previo a publish');
+  assert.ok(y.includes('cargo test -p wyrm'), 'falta cargo test en CI');
+  assert.ok(y.includes('pnpm test:e2e'), 'falta gate e2e en CI');
+  assert.ok(y.includes('wyrm-x86_64-pc-windows-msvc.exe'), 'falta artifact del binario');
+  assert.ok(y.includes('action-gh-release'), 'falta GitHub Release');
 });
 
 test('versiones sincronizadas: Cargo.toml == npm/package.json', () => {

@@ -213,25 +213,27 @@ crates/wyrm/src:
 
 ## Release (mantenedores)
 
-Todo automático al pushear un tag `vX.Y.Z`:
+El tag `vX.Y.Z` dispara CI: `cargo test` → `pnpm test:e2e` → build x64
+release → GitHub Release con `wyrm-x86_64-pc-windows-msvc.exe` + `.sha256`.
+CI nunca publica a npm (sin token a propósito).
 
 ```powershell
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-CI hace: `cargo test` → build x64 release → GitHub Release con
-`wyrm-x86_64-pc-windows-msvc.exe` + `.sha256` → sync de versión en
-`npm/package.json` → mete el exe en `npm/vendor/` → `npm publish`.
-El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
-
-Requisitos: secret `NPM_TOKEN` en el repo. Verificación local previa:
+Publicación manual a npm (verificada por `tests/e2e/prod-install.test.mjs`):
 
 ```powershell
 cargo test -p wyrm
 pnpm test:e2e  # deploy-check + ciclo CLI + install prod simulado
+pnpm run build  # rust release + copia a npm/vendor/wyrm.exe
+node npm/bin/cli.js --version  # smoke
 pnpm --dir npm pack --dry-run  # debe listar bin/cli.js + vendor/wyrm.exe
+cd npm; pnpm publish --access public  # con tu sesión (pnpm login)
 ```
+
+El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
 
 ## Desarrollo
 
