@@ -6,6 +6,7 @@
 // Sin dependencias: solo builtins de node. Falla rápido ante cualquier error.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,9 +79,26 @@ function latestPublished() {
   return parseVer(tok) ? tok : null;
 }
 
-function tokenFromNpmrc() {
+function stripQuotes(s) {
+  return s.trim().replace(/^["']|["']$/g, '');
+}
+
+// pnpm login (v10+) guarda el token en su config.yaml propio, NO en ~/.npmrc.
+// Orden: env explícito -> config.yaml de pnpm -> archivos .npmrc.
+function findNpmToken() {
+  if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN) {
+    return process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN;
+  }
+  const pnpmCfg =
+    process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA ?? '', 'pnpm', 'config', 'config.yaml')
+      : path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'pnpm', 'config.yaml');
+  if (pnpmCfg && fs.existsSync(pnpmCfg)) {
+    const m = fs.readFileSync(pnpmCfg, 'utf8').match(/authToken:\s*(.+)/);
+    if (m && stripQuotes(m[1])) return stripQuotes(m[1]);
+  }
   const files = [
-    path.join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.npmrc'),
+    path.join(os.homedir(), '.npmrc'),
     path.join(ROOT, '.npmrc'),
     path.join(NPM_DIR, '.npmrc'),
   ];
@@ -88,7 +106,7 @@ function tokenFromNpmrc() {
     if (!fs.existsSync(f)) continue;
     const m = fs.readFileSync(f, 'utf8').match(/_authToken\s*=\s*(.+)/);
     if (!m) continue;
-    let t = m[1].trim().replace(/^["']|["']$/g, '');
+    let t = stripQuotes(m[1]);
     const envRef = t.match(/^\$\{(.+)\}$/);
     if (envRef) t = process.env[envRef[1]] ?? '';
     if (t) return t;
@@ -100,7 +118,7 @@ function tokenFromNpmrc() {
 // de compilar/testear en vano (un 404 al publicar casi siempre es identidad
 // sin permiso como maintainer, no problema de versión).
 async function authPreflight() {
-  const token = process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN || tokenFromNpmrc();
+  const token = findNpmToken();
   if (!token) {
     fail('sin sesión npm (no hay authToken). Corre `pnpm login`, completa el OAuth y reintenta');
   }
