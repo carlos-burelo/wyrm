@@ -229,8 +229,8 @@ Requisitos: secret `NPM_TOKEN` en el repo. Verificación local previa:
 
 ```powershell
 cargo test -p wyrm
-node --check npm/scripts/install.js
-npm pack --dry-run  # en npm/: confirma 4 archivos, sin vendor/
+pnpm test:e2e  # deploy-check + ciclo CLI + install prod simulado
+pnpm --dir npm pack --dry-run  # debe listar bin/cli.js + vendor/wyrm.exe
 ```
 
 ## Desarrollo
@@ -238,6 +238,7 @@ npm pack --dry-run  # en npm/: confirma 4 archivos, sin vendor/
 ```powershell
 cargo check -p wyrm
 cargo test -p wyrm
+pnpm test:e2e   # e2e fuera de .rs: tests/e2e/ (deploy, ciclo CLI, prod)
 cargo fmt
 cargo clippy -p wyrm
 ```

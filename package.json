@@ -4,7 +4,13 @@
   "scripts": {
     "build:rust": "cargo build --release",
     "copy:bin": "node -e \"const fs = require('fs'); if (!fs.existsSync('npm/vendor')) fs.mkdirSync('npm/vendor', { recursive: true }); fs.copyFileSync('target/release/wyrm.exe', 'npm/vendor/wyrm.exe');\"",
-    "build": "npm run build:rust && npm run copy:bin",
+    "build": "pnpm run build:rust && pnpm run copy:bin",
+    "test": "cargo test -p wyrm",
+    "test:e2e": "node --test \"tests/e2e/*.test.mjs\"",
+    "test:e2e:cli": "node --test tests/e2e/cli-cycle.test.mjs",
+    "test:e2e:deploy": "node --test tests/e2e/deploy-check.test.mjs",
+    "test:e2e:prod": "node --test tests/e2e/prod-install.test.mjs",
+    "test:all": "cargo test -p wyrm && node --test \"tests/e2e/*.test.mjs\"",
     "test:cli": "node npm/bin/cli.js"
   }
 }

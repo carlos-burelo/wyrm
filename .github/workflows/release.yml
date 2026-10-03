@@ -5,8 +5,8 @@ on:
     tags:
       - 'v*'
 
-# El tag dispara todo: tests -> binario x64 -> GitHub Release -> npm.
-# Requiere el secret NPM_TOKEN (token de npm con acceso al paquete wyrm).
+# El tag dispara todo: tests -> e2e -> binario x64 -> GitHub Release -> npm.
+# Requiere el secret NPM_TOKEN (token de npm con acceso a @carlos-burelo/wyrm).
 
 permissions:
   contents: write
@@ -38,6 +38,17 @@ jobs:
 
       - name: Build Release Binary
         run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Run e2e (despliegue + ciclo + prod)
+        run: pnpm test:e2e
 
       - name: Prepare Release Assets
         shell: pwsh
@@ -74,6 +85,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -89,13 +103,8 @@ jobs:
           fi
           TAG_VERSION="${TAG#v}"
           echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
-          cd npm
-          CURRENT="$(node -p "require('./package.json').version")"
-          if [ "$CURRENT" != "$TAG_VERSION" ]; then
-            npm version "$TAG_VERSION" --no-git-tag-version
-          else
-            echo "package.json ya en $TAG_VERSION, sin cambios."
-          fi
+          export TAG_VERSION
+          node -e "const fs=require('fs');const p='npm/package.json';const j=JSON.parse(fs.readFileSync(p));if(j.version!==process.env.TAG_VERSION){j.version=process.env.TAG_VERSION;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('version sync -> '+process.env.TAG_VERSION);}else{console.log('package.json ya en '+process.env.TAG_VERSION+', sin cambios.');}"
 
       - name: Stage vendor binary from build artifact
         uses: actions/download-artifact@v4
@@ -110,13 +119,21 @@ jobs:
           ls -la npm/vendor
           test -s npm/vendor/wyrm.exe
 
+      - name: Smoke test staged wrapper
+        run: |
+          node npm/bin/cli.js --version
+          node npm/bin/cli.js doctor
+
+      - name: Pack dry-run gate
+        run: pnpm --dir npm pack --dry-run
+
       - name: Publish to npm (idempotente)
         run: |
           cd npm
-          if npm view "wyrm@$TAG_VERSION" version 2>/dev/null; then
-            echo "wyrm@$TAG_VERSION ya publicado, skip."
+          if pnpm view "@carlos-burelo/wyrm@$TAG_VERSION" version 2>/dev/null; then
+            echo "@carlos-burelo/wyrm@$TAG_VERSION ya publicado, skip."
           else
-            npm publish --access public
+            pnpm publish --no-git-checks --access public
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
