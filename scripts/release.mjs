@@ -219,14 +219,7 @@ if (current !== VER || cargoVersion() !== VER) {
 const view = sh(`pnpm view "${SCOPE}@${VER}" version`);
 if (view.status === 0) fail(`${SCOPE}@${VER} ya publicado; sube la versión`);
 
-// --- 4. Tests -----------------------------------------------------------------
-step('unit tests (cargo)');
-must(sh('cargo test -p wyrm'), 'cargo test falló');
-
-step('e2e (tests/e2e/)');
-must(sh('node --test "tests/e2e/*.test.mjs"'), 'e2e falló');
-
-// --- 5. Build + vendor + smoke --------------------------------------------------
+// --- 4. Build + vendor (antes de testear: el e2e valida ESTE binario) --------
 step('build release');
 must(sh('cargo build --release'), 'cargo build falló');
 fs.mkdirSync(path.join(NPM_DIR, 'vendor'), { recursive: true });
@@ -235,6 +228,14 @@ fs.copyFileSync(
   path.join(NPM_DIR, 'vendor', 'wyrm.exe'),
 );
 
+// --- 5. Tests ------------------------------------------------------------------
+step('unit tests (cargo)');
+must(sh('cargo test -p wyrm'), 'cargo test falló');
+
+step('e2e (tests/e2e/)');
+must(sh('node --test "tests/e2e/*.test.mjs"'), 'e2e falló');
+
+// --- 6. Smoke wrapper + tarball ----------------------------------------------------
 step('smoke wrapper + tarball');
 const cli = path.join(NPM_DIR, 'bin', 'cli.js');
 const v = must(run(process.execPath, [cli, '--version']), 'wrapper no responde');
@@ -246,7 +247,7 @@ for (const f of ['bin/cli.js', 'vendor/wyrm.exe', 'package.json']) {
 }
 console.log('tarball ok: bin/cli.js + vendor/wyrm.exe');
 
-// --- 6. Commit + tag + push -------------------------------------------------------
+// --- 7. Commit + tag + push -------------------------------------------------------
 step('git tag + push');
 if (DRY) {
   console.log('dry-run: aquí commitearía bump, crearía v' + VER + ' y pushearía main + tag');
@@ -265,7 +266,7 @@ if (DRY) {
   console.log(`tag v${VER} pusheado: CI construye el GitHub Release`);
 }
 
-// --- 7. Publish (único paso manual: OAuth) ------------------------------------------
+// --- 8. Publish (único paso manual: OAuth) ------------------------------------------
 step('npm publish');
 if (DRY) {
   console.log('dry-run: aquí correría `pnpm --dir npm publish --access public` (OAuth en navegador)');
