@@ -1,6 +1,6 @@
 {
   "name": "@carlos-burelo/wyrm",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "El gestor de procesos definitivo para Windows Server escrito en Rust",
   "main": "bin/cli.js",
   "files": [
