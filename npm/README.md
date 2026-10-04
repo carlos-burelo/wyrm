@@ -1,11 +1,13 @@
-# Wyrm 🐉
+![Wyrm](https://raw.githubusercontent.com/carlos-burelo/wyrm/main/banner.jpg)
 
-**Wyrm** es un gestor de procesos de ultra alto rendimiento escrito en **Rust**, enfocado en **Windows Server**. Mantiene aplicaciones Node.js, Next.js, Astro y Express corriendo como Servicio de Windows nativo con Zero-Config.
+# Wyrm
 
-- Supervisor real con `JobObjects` (`KILL_ON_JOB_CLOSE`), auto-restart con backoff y restore al arrancar.
-- IPC por Named Pipe con protocolo tipado `Request/Response` NDJSON.
-- CLI completa: `start/stop/restart/delete/list/status/logs/daemon/top/service`.
-- TUI de primer nivel con Ratatui: lista, métricas CPU/MEM, logs en vivo, filtro y acciones.
+Gestor de procesos escrito en Rust para Windows Server. Mantiene aplicaciones Node.js, Next.js, Astro y Express en ejecución como servicio de Windows, con detección automática de `package.json`, `.next/standalone`, Astro y pnpm/yarn/bun.
+
+- Supervisor con `JobObjects` (`KILL_ON_JOB_CLOSE`), auto-restart y restore al arrancar.
+- IPC por Named Pipe con protocolo `Request/Response` NDJSON.
+- CLI: `start/stop/restart/delete/list/status/logs/daemon/top/service`.
+- TUI con Ratatui: lista, métricas CPU/MEM, logs en vivo, filtro y acciones.
 - Logs por app en `%ProgramData%\wyrm\logs\<name>.log`.
 - DB SQLite en `%ProgramData%\wyrm\wyrm.db`.
 
@@ -106,12 +108,15 @@ wyrm rollback <app>             # git reset al último deploy ok + restart
 ```
 
 Hooks en `wyrm.json` por app: `pre_deploy` / `post_deploy` (shell `cmd /C`).
-Historial en SQLite (`deploys`).
+El `wyrm.json` debe estar en el `cwd` de la app (no se buscan directorios
+padre). Historial en SQLite (`deploys`).
 
 ## API local + métricas (plano de control)
 
 El demonio sirve `http://127.0.0.1:8379` (`WYRM_API_ADDR`, off con
-`WYRM_NO_API=1`). Auth Bearer con token en `%ProgramData%\wyrm\token`:
+`WYRM_NO_API=1`). Auth Bearer con token en `%ProgramData%\wyrm\token`
+(el token se aplica al arrancar el demonio; tras `token --rotate`
+reinicia el demonio o servicio):
 
 ```powershell
 wyrm token            # muestra el token
@@ -146,7 +151,7 @@ wyrm service install
 wyrm service uninstall
 ```
 
-## TUI (`wyrm top`) — mejor que `pm2 monit`
+## TUI (`wyrm top`)
 
 Dashboard dos paneles: lista + detalle + sparklines CPU/MEM + preview logs.
 Tabs `1/2/3` o `tab` para Dashboard / Logs / Help.
@@ -177,7 +182,7 @@ CLI (clap) ──Named Pipe NDJSON──> Daemon
   │                                ├─ HashMap<String, ManagedApp>
   │                                ├─ JobObject por proceso
   │                                ├─ logs a archivo (append)
-  │                                └─ supervise loop cada 2s + backoff
+  │                                └─ supervise loop cada 2s
   └─ fallback DB (SQLite) si demonio off
 
 crates/wyrm/src:
@@ -195,7 +200,7 @@ crates/wyrm/src:
   tui/         state/data/actions/events/theme/views
 ```
 
-## Límites conocidos (honestos)
+## Límites conocidos
 
 - **ACME real sin probar E2E**: `cert issue --prod` requiere DNS público
   apuntando al servidor + `wyrm edge` en :80. Usa `--staging` primero.
@@ -205,6 +210,13 @@ crates/wyrm/src:
   CTRL+BREAK elegante queda futuro.
 - **Policies fuera de SQLite**: viven en `wyrm.json`/payload `START`;
   el restore tras reinicio usa defaults.
+- **Hooks solo con `wyrm.json` en el cwd de la app**: no se buscan
+  directorios padre; con layout multi-app de raíz se ignoran en silencio.
+- **Token en memoria**: `token --rotate` aplica al reiniciar el demonio.
+- **Un solo demonio**: dos instancias compiten por el pipe; antes de
+  arrancar, termina restos con `taskkill /F /IM wyrm.exe`.
+- **Reintento inmediato**: el backoff calculado no espera; el loop de 2s
+  es el único intervalo entre reintentos.
 - **API solo loopback** (`127.0.0.1:8379`); el token vive en archivo con los
   permisos del FS del SO.
 - **Single-node**: un demonio por pipe, sin clustering multi-máquina.
@@ -213,31 +225,38 @@ crates/wyrm/src:
 
 ## Release (mantenedores)
 
-Todo automático al pushear un tag `vX.Y.Z`:
+El tag `vX.Y.Z` dispara CI: `cargo test` → `pnpm test:e2e` → build x64
+release → GitHub Release con `wyrm-x86_64-pc-windows-msvc.exe` + `.sha256`.
+CI nunca publica a npm (sin token a propósito).
 
 ```powershell
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-CI hace: `cargo test` → build x64 release → GitHub Release con
-`wyrm-x86_64-pc-windows-msvc.exe` + `.sha256` → sync de versión en
-`npm/package.json` → mete el exe en `npm/vendor/` → `npm publish`.
-El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
-
-Requisitos: secret `NPM_TOKEN` en el repo. Verificación local previa:
+Publicación en un comando (tu único trabajo: el OAuth de npm en el navegador):
 
 ```powershell
-cargo test -p wyrm
-node --check npm/scripts/install.js
-npm pack --dry-run  # en npm/: confirma 4 archivos, sin vendor/
+pnpm release        # auto-bump: patch sobre lo último publicado
+pnpm release 1.0.2 # versión exacta
 ```
+
+El script verifica sesión npm + maintainer primero (un 404 al publicar
+casi siempre es identidad sin permiso, no versión), sincroniza
+`Cargo.toml`/`npm/package.json`, corre unit + e2e, compila, mete el exe en
+`npm/vendor/`, hace smoke del wrapper y del tarball, pushea `main` + tag
+`vX.Y.Z` (CI construye el GitHub Release) y publica con `pnpm publish`.
+Falla rápido ante cualquier error.
+Simula sin efectos con `pnpm release --dry-run`.
+
+El tarball es autocontenido (sin postinstall: funciona con npm/pnpm/yarn/bun).
 
 ## Desarrollo
 
 ```powershell
 cargo check -p wyrm
 cargo test -p wyrm
+pnpm test:e2e   # e2e fuera de .rs: tests/e2e/ (deploy, ciclo CLI, prod)
 cargo fmt
 cargo clippy -p wyrm
 ```
