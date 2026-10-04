@@ -23,7 +23,8 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
-    )?;
+    )
+    .map_err(|e| format!("abriendo Service Manager (¿consola elevada?): {e}"))?;
 
     let service_info = ServiceInfo {
         name: OsString::from(SERVICE_NAME),
@@ -38,7 +39,9 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
         account_password: None,
     };
 
-    let service = manager.create_service(&service_info, ServiceAccess::CHANGE_CONFIG)?;
+    let service = manager
+        .create_service(&service_info, ServiceAccess::CHANGE_CONFIG)
+        .map_err(|e| format!("creando servicio {SERVICE_NAME}: {e}"))?;
 
     let actions = vec![
         ServiceAction {
@@ -51,12 +54,21 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    service.update_failure_actions(ServiceFailureActions {
+    // El recovery no es fatal: en algunos entornos el SCM lo deniega aun
+    // como admin (código 5). El servicio queda instalado y funcional; las
+    // acciones se pueden fijar con:
+    // `sc.exe failure WyrmDaemon reset= 86400 actions= restart/5000/restart/10000`
+    if let Err(e) = service.update_failure_actions(ServiceFailureActions {
         reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86400)),
         reboot_msg: None,
         command: None,
         actions: Some(actions),
-    })?;
+    }) {
+        eprintln!("Aviso: servicio instalado pero sin recovery automático ({e}).");
+        eprintln!(
+            "Fíjalo manual: sc.exe failure {SERVICE_NAME} reset= 86400 actions= restart/5000/restart/10000"
+        );
+    }
 
     println!(
         "Servicio {} instalado y configurado para arranque automático.",
