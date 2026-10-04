@@ -41,7 +41,16 @@ pub fn install_service() -> Result<(), Box<dyn std::error::Error>> {
 
     let service = manager
         .create_service(&service_info, ServiceAccess::CHANGE_CONFIG)
-        .map_err(|e| format!("creando servicio {SERVICE_NAME}: {e}"))?;
+        .map_err(|e| {
+            // 1072 = borrado pendiente: el demonio viejo sigue vivo o hay
+            // handles abiertos (services.msc). Sin cerrar eso no hay reinstall.
+            // (El código solo aparece en el Debug del error Winapi.)
+            if format!("{e:?}").contains("1072") {
+                format!("creando servicio {SERVICE_NAME}: marcado para borrado (1072). Mata el demonio viejo con `taskkill /F /IM wyrm.exe`, cierra services.msc y reintenta; si persiste, reinicia.")
+            } else {
+                format!("creando servicio {SERVICE_NAME}: {e}")
+            }
+        })?;
 
     let actions = vec![
         ServiceAction {
@@ -96,7 +105,12 @@ pub fn start_service_dispatcher() -> Result<(), windows_service::Error> {
 fn my_service_main(_arguments: Vec<OsString>) {
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
-            ServiceControl::Stop => ServiceControlHandlerResult::NoError,
+            ServiceControl::Stop => {
+                // Apagado real del proceso. Sin esto el SCM nunca completa el
+                // Stop: el `uninstall` deja el servicio en "marked for deletion"
+                // (1072) y el reinstall falla. Los hijos mueren con el JobObject.
+                std::process::exit(0);
+            }
             _ => ServiceControlHandlerResult::NotImplemented,
         }
     };
